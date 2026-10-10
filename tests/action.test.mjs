@@ -29,5 +29,20 @@ describe("action.yml", () => {
       "--max-turns 22",
       '--allowedTools "Glob,Grep,LS,Read,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*)"',
     ]);
+    assert.match(claudeArgs.join(" "), /Bash\(git diff:\*\)/);
+  });
+
+  it("denies Read, Grep and Glob under .git via Claude settings", () => {
+    const settings = JSON.parse(action.match(/settings: \|\n((?: {10}.*\n)+)/)[1].replace(/^ {10}/gm, ""));
+    assert.deepEqual(settings.permissions.deny, [
+      "Read(.git/**)",
+      "Read(**/.git/**)",
+      "Grep(.git/**)",
+      "Glob(.git/**)",
+    ]);
+  });
+
+  it("skips install and Claude when workflow validation would fail", () => {
+    assert.match(action, /skip_workflow_validation != 'true'/);
   });
 });

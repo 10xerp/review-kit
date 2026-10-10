@@ -96,6 +96,7 @@ verdict=blocked
 - The review standards come from the PR's base branch. `.claude/` and `CLAUDE.md` are also replaced by their base-branch versions before Claude starts.
 - Claude runs with `--strict-mcp-config`, so the repo's `.mcp.json` is ignored.
 - Claude also runs with `--restricted`, so repo settings files and their hooks are ignored.
+- Read, Grep and Glob are denied for `.git/**` paths (so Claude cannot read `.git/config`, where the action stores its token). `git diff` and the other allowed Bash git commands still work.
 - The only tools are Read, Grep, Glob and Bash restricted to `git diff`, `git log`, `git show` and `git rev-parse`. `git add`, `git commit` and `git rm` are denied.
 - Only review comments written by `claude[bot]` are trusted.
 

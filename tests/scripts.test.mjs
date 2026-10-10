@@ -139,8 +139,12 @@ function review(t, { action = "synchronize", draft = false, comments = [], claud
   const run = { prep, prompt: prep.outputs.prompt };
   if (prep.status !== 0 || prep.outputs.review !== "true") return run;
 
-  const env = { REVIEW_MODEL: "claude-opus-5-5", CLAUDE_CODE_ACTION_SHA: "1d6de8cb0c237e7c15e9e1bdf973826ebae490cc" };
-  if (prep.outputs.skip_model !== "true") {
+  const env = {
+    REVIEW_MODEL: "claude-opus-5-5",
+    CLAUDE_CODE_ACTION_SHA: "1d6de8cb0c237e7c15e9e1bdf973826ebae490cc",
+    WORKFLOW_VALIDATION_SKIP: prep.outputs.skip_workflow_validation,
+  };
+  if (prep.outputs.skip_model !== "true" && prep.outputs.skip_workflow_validation !== "true") {
     const sticky = comments.find((c) => c.id === Number(prep.outputs.prior_comment_id));
     const others = comments.filter((c) => c !== sticky);
     const written = { id: sticky?.id ?? 900, user: bot, body: claudeBody, updated_at: "2999-01-01T00:00:00Z" };
@@ -153,7 +157,10 @@ function review(t, { action = "synchronize", draft = false, comments = [], claud
   }
   run.finalize = step(t, "finalize.sh", env);
   const patch = join(t.stubs, "PATCH.json");
+  const post = join(t.stubs, "POST.json");
+  run.posted = existsSync(post) ? "POST" : existsSync(patch) ? "PATCH" : null;
   run.comment = existsSync(patch) ? JSON.parse(readFileSync(patch, "utf8")).body : null;
+  run.claudeCalled = existsSync(join(t.stubs, "claude.args"));
   run.patchedId = readFileSync(join(t.stubs, "gh.log"), "utf8").match(/--method PATCH \S+\/issues\/comments\/(\d+)/)?.[1];
   const recordPath = run.finalize.outputs.record_path;
   run.record = recordPath ? JSON.parse(readFileSync(recordPath, "utf8")) : null;
@@ -174,6 +181,15 @@ function assertGate(run, verdict) {
 }
 
 const BLOCKED = "# Review: Blocked\n\n## Issues (Must Fix)\n- src/app.js:1 [security]: tenant filter missing\n";
+
+function setupWorkflowDrift() {
+  const t = setup([{ "src/app.js": "export const a = 2;\n" }]);
+  git(t.repo, "checkout", "-q", "main");
+  commit(t.repo, { [WORKFLOW]: "name: Claude Code Review\non: {}\n# base updated\n" }, "workflow on main");
+  git(t.repo, "push", "-q", "origin", "main");
+  git(t.repo, "checkout", "-q", "feature");
+  return t;
+}
 
 describe("skip rules", () => {
   it("skips draft PRs and passes", () => {
@@ -202,6 +218,26 @@ describe("skip rules", () => {
   it("reviews PRs that change other workflows", () => {
     const t = setup([{ ".github/workflows/deploy.yml": "name: deploy\n" }]);
     assert.equal(review(t, { claudeBody: "# Review: Approved\n" }).prep.outputs.review, "true");
+  });
+
+  it("passes when the workflow file on HEAD differs from the default branch without editing it in this PR", () => {
+    const t = setupWorkflowDrift();
+    const prior = priorComment(t, { verdict: "blocked", lastSha: "abc", body: "# Review: Blocked\n\n## Issues (Must Fix)\n- [F1] a.ts:1 [security]: x\n" });
+    const run = review(t, { comments: [prior] });
+    assert.equal(run.prep.status, 0, run.prep.stderr);
+    assert.equal(run.prep.outputs.skip_workflow_validation, "true");
+    assert.equal(run.prep.outputs.review, "true");
+    assert.match(run.prep.stdout, /Review skipped: workflow differs from default branch/);
+    assert.equal(run.claudeCalled, false);
+    assert.equal(run.finalize.status, 0, run.finalize.stderr);
+    assert.equal(run.finalize.outputs.verdict, "skipped");
+    assert.equal(run.posted, null);
+    assert.equal(run.comment, null);
+    assert.match(run.finalize.stdout, /Review skipped: workflow differs from default branch/);
+    assert.equal(run.record.source, "workflow_validation");
+    assert.equal(run.record.mode, "skipped");
+    assert.equal(run.record.verdict, "skipped");
+    assert.equal(run.record.skip_reason, "workflow differs from default branch");
   });
 });
 
