@@ -1,0 +1,67 @@
+name: 10x Claude PR Review
+description: Shared Claude Code PR review (review-kit v1) for 10X repos.
+branding:
+  icon: search
+  color: blue
+
+inputs:
+  anthropic_api_key:
+    description: Anthropic API key for Claude Code (repository secret ANTHROPIC_API_KEY).
+    required: true
+  github_token:
+    description: Token for PR comments and checks (defaults to the workflow GITHUB_TOKEN).
+    required: false
+    default: ${{ github.token }}
+  trusted_base_branch:
+    description: Branch used for review standards and other trusted consumer-repo files (never the PR head).
+    required: false
+    default: ""
+  claude_code_version:
+    description: Pinned Claude Code version when installing from claude.ai/install.sh.
+    required: false
+    default: "2.1.42"
+  path_to_claude_code_executable:
+    description: Optional path to a preinstalled Claude Code binary (skips install when set and executable).
+    required: false
+    default: ""
+  claude_model:
+    description: Claude model id passed to Claude Code.
+    required: false
+    default: "claude-sonnet-4-5"
+  max_turns:
+    description: Maximum agent turns for the review run.
+    required: false
+    default: "40"
+
+outputs:
+  verdict:
+    description: Canonical parsed verdict (approve, approve_with_notes, blocked).
+    value: ${{ steps.review.outputs.verdict }}
+  review_record_path:
+    description: Path to the per-review JSON record written in the runner workspace.
+    value: ${{ steps.review.outputs.review_record_path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run Claude PR review
+      id: review
+      shell: bash
+      env:
+        INPUT_ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github_token }}
+        INPUT_TRUSTED_BASE_BRANCH: ${{ inputs.trusted_base_branch }}
+        INPUT_CLAUDE_CODE_VERSION: ${{ inputs.claude_code_version }}
+        INPUT_PATH_TO_CLAUDE_CODE_EXECUTABLE: ${{ inputs.path_to_claude_code_executable }}
+        INPUT_CLAUDE_MODEL: ${{ inputs.claude_model }}
+        INPUT_MAX_TURNS: ${{ inputs.max_turns }}
+        REVIEW_KIT_ACTION_PATH: ${{ github.action_path }}
+      run: bash "${{ github.action_path }}/scripts/claude-review/run-review.sh"
+
+    - name: Upload review record artifact
+      if: always() && steps.review.outputs.verdict != 'skipped'
+      uses: actions/upload-artifact@v4
+      with:
+        name: review-record-${{ github.event.pull_request.number }}
+        path: review-record/review-record.json
+        if-no-files-found: ignore
