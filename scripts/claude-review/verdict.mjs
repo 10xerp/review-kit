@@ -24,6 +24,8 @@ export function verdictSummary(verdict) {
       return "Approve with notes";
     case "approved":
       return "Approved";
+    case "skipped":
+      return "Review skipped (workflow differs from default branch)";
     default:
       return verdict;
   }

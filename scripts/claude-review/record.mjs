@@ -90,6 +90,7 @@ export function buildReviewRecord(input) {
     mode: input.mode,
     source: input.source,
     verdict: input.verdict,
+    skip_reason: input.skipReason ?? null,
     findings: input.findings.map((f) => ({
       id: f.id ?? "",
       severity: f.severity,

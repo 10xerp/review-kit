@@ -51,6 +51,16 @@ if [[ "$(jq -r .review <<< "$SCOPE")" != true ]]; then
   skip
 fi
 
+skip_workflow_validation=false
+if git cat-file -e "$BASE:$WORKFLOW_PATH" 2> /dev/null || git cat-file -e "HEAD:$WORKFLOW_PATH" 2> /dev/null; then
+  if ! git cat-file -e "$BASE:$WORKFLOW_PATH" 2> /dev/null || ! git cat-file -e "HEAD:$WORKFLOW_PATH" 2> /dev/null ||
+    ! git diff --quiet "$BASE:$WORKFLOW_PATH" "HEAD:$WORKFLOW_PATH" 2> /dev/null; then
+    skip_workflow_validation=true
+    echo "::notice::Review skipped: workflow differs from default branch"
+    step_summary "## Claude review: skipped (workflow differs from default branch)"
+  fi
+fi
+
 git show "$BASE:$STANDARDS_PATH" > "$WORK/standards.md" 2> /dev/null ||
   fail "$STANDARDS_PATH is missing on $PR_BASE"
 STANDARDS_SHA="$(sha256sum "$WORK/standards.md" | cut -c1-64)"
@@ -120,14 +130,18 @@ jq \
   --arg standards_sha256 "$STANDARDS_SHA" \
   --arg run_started "$RUN_STARTED" \
   --argjson job_started "$JOB_STARTED" \
+  --argjson skip_workflow_validation "$skip_workflow_validation" \
   '. + $ARGS.named' "$WORK/prior.json" > "$STATE"
 
 output review true
 output skip_model "$skip_model"
+output skip_workflow_validation "$skip_workflow_validation"
 output prior_comment_id "$(state prior_comment_id)"
 
 if [[ "$skip_model" == true ]]; then
   echo "::notice::Carry-forward review (no model run)."
+elif [[ "$skip_workflow_validation" == true ]]; then
+  :
 else
   # Claude may only load repo instructions and config from the base branch, never the PR head.
   rm -rf .claude CLAUDE.md

@@ -27,14 +27,14 @@ runs:
       run: '"$GITHUB_ACTION_PATH/scripts/claude-review/prep.sh"'
 
     - id: install
-      if: steps.prep.outputs.review == 'true' && steps.prep.outputs.skip_model != 'true'
+      if: steps.prep.outputs.review == 'true' && steps.prep.outputs.skip_model != 'true' && steps.prep.outputs.skip_workflow_validation != 'true'
       shell: bash
       env:
         CLAUDE_CODE_ACTION_SHA: 1d6de8cb0c237e7c15e9e1bdf973826ebae490cc
       run: '"$GITHUB_ACTION_PATH/scripts/claude-review/install.sh"'
 
     - id: claude
-      if: steps.prep.outputs.review == 'true' && steps.prep.outputs.skip_model != 'true'
+      if: steps.prep.outputs.review == 'true' && steps.prep.outputs.skip_model != 'true' && steps.prep.outputs.skip_workflow_validation != 'true'
       uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1
       with:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
@@ -42,6 +42,17 @@ runs:
         track_progress: true
         use_sticky_comment: true
         path_to_claude_code_executable: ${{ steps.install.outputs.claude_code_path }}
+        settings: |
+          {
+            "permissions": {
+              "deny": [
+                "Read(.git/**)",
+                "Read(**/.git/**)",
+                "Grep(.git/**)",
+                "Glob(.git/**)"
+              ]
+            }
+          }
         # --strict-mcp-config: ignore the repo's .mcp.json; only the action's own MCP servers load.
         # --restricted: ignore repo settings files (PR hooks never run) and drop every built-in tool
         # not named in --tools. Without Bash in --tools, the git commands below are unavailable.
@@ -61,6 +72,7 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        WORKFLOW_VALIDATION_SKIP: ${{ steps.prep.outputs.skip_workflow_validation }}
         CLAUDE_CODE_ACTION_SHA: 1d6de8cb0c237e7c15e9e1bdf973826ebae490cc
         REVIEW_MODEL: claude-opus-5-5
       run: '"$GITHUB_ACTION_PATH/scripts/claude-review/finalize.sh"'
