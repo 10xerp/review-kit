@@ -1,58 +1,32 @@
 #!/usr/bin/env bash
-# Pin Claude Code install with optional custom executable (hub-compatible).
+# Prints the path of the Claude Code executable to use. Logs go to stderr.
 set -euo pipefail
 
-CLAUDE_CODE_VERSION="${INPUT_CLAUDE_CODE_VERSION:-2.1.42}"
+VERSION="${INPUT_CLAUDE_CODE_VERSION:?claude_code_version is required}"
 CUSTOM="${INPUT_PATH_TO_CLAUDE_CODE_EXECUTABLE:-}"
 
-resolve_claude() {
-  if [[ -n "$CUSTOM" && -x "$CUSTOM" ]]; then
-    echo "$CUSTOM"
-    return 0
+if [[ -n "$CUSTOM" ]]; then
+  if [[ ! -x "$CUSTOM" ]]; then
+    echo "::error::path_to_claude_code_executable is not an executable file: $CUSTOM" >&2
+    exit 1
   fi
-  if [[ -n "$CUSTOM" && ! -x "$CUSTOM" ]]; then
-    echo "::warning::path_to_claude_code_executable is set but not executable: $CUSTOM — falling back to install" >&2
-  fi
-  if command -v claude >/dev/null 2>&1; then
-    command -v claude
-    return 0
-  fi
-  local home_bin="${HOME}/.local/bin/claude"
-  if [[ -x "$home_bin" ]]; then
-    echo "$home_bin"
-    return 0
-  fi
-  return 1
-}
-
-if resolved="$(resolve_claude)"; then
-  echo "Using Claude Code executable: $resolved"
-  printf 'claude_executable=%q\n' "$resolved"
-  dirname "$resolved" >> "${GITHUB_PATH:-/dev/null}" 2>/dev/null || true
-  export PATH="$(dirname "$resolved"):$PATH"
+  echo "Using provided Claude Code executable: $CUSTOM" >&2
+  echo "$CUSTOM"
   exit 0
 fi
 
-echo "Installing Claude Code v${CLAUDE_CODE_VERSION}..."
-for attempt in 1 2 3; do
-  echo "Installation attempt ${attempt}..."
-  if curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_CODE_VERSION"; then
-    break
-  fi
-  if [[ "$attempt" -eq 3 ]]; then
-    echo "::error::Failed to install Claude Code after 3 attempts"
-    exit 1
-  fi
-  sleep 5
-done
-
-home_bin="${HOME}/.local/bin/claude"
-if [[ ! -x "$home_bin" ]]; then
-  echo "::error::Claude Code install did not produce ${home_bin}"
-  exit 1
+BIN="$HOME/.local/bin/claude"
+if ! { curl -fsSL --retry 3 https://claude.ai/install.sh | bash -s -- "$VERSION" >&2 && [[ -x "$BIN" ]]; }; then
+  echo "::warning::Direct install of Claude Code $VERSION failed; falling back to npm" >&2
+  PREFIX="${RUNNER_TEMP:?}/claude-code-npm"
+  npm install --silent --no-fund --no-audit --prefix "$PREFIX" "@anthropic-ai/claude-code@$VERSION" >&2
+  BIN="$PREFIX/node_modules/.bin/claude"
 fi
 
-echo "${HOME}/.local/bin" >> "${GITHUB_PATH:-/dev/null}" 2>/dev/null || true
-export PATH="${HOME}/.local/bin:$PATH"
-printf 'claude_executable=%q\n' "$home_bin"
-echo "Installed Claude Code: $home_bin" >&2
+INSTALLED="$("$BIN" --version | awk '{print $1}')"
+if [[ "$INSTALLED" != "$VERSION" ]]; then
+  echo "::error::Expected Claude Code $VERSION but $BIN reports $INSTALLED" >&2
+  exit 1
+fi
+echo "Installed Claude Code $INSTALLED at $BIN" >&2
+echo "$BIN"
