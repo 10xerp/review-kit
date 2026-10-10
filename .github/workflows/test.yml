@@ -1,0 +1,45 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Unit and integration tests
+        run: node --test
+      - name: Shellcheck
+        run: shellcheck -x scripts/claude-review/*.sh
+
+  install-claude:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Download the Claude Code release pinned by claude-code-action and verify its checksum
+        run: |
+          sha=$(grep -oP 'claude-code-action@\K[0-9a-f]{40}' action.yml)
+          path=$(node scripts/claude-review/install-claude-code.mjs --out-dir "$RUNNER_TEMP/claude" --action-ref "$sha")
+          test -x "$path"
+          "$path" --version
+          jq . "$RUNNER_TEMP/claude/install-meta.json"
+          echo "CLAUDE_BIN=$path" >> "$GITHUB_ENV"
+      - name: Restricted mode keeps exactly the review tools
+        run: |
+          cd "$(mktemp -d)" && git init -q
+          out=$(echo hi | ANTHROPIC_API_KEY=sk-ant-invalid timeout 120 "$CLAUDE_BIN" -p --restricted --strict-mcp-config \
+            --tools "Bash,Glob,Grep,Read" --max-turns 1 --output-format stream-json --verbose 2> /dev/null || true)
+          jq -se '.[0].tools' <<< "$out"
+          jq -se '.[0].tools == ["Bash","Glob","Grep","Read"]' <<< "$out"
