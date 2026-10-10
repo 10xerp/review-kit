@@ -1,59 +1,79 @@
 name: Claude PR Review
-description: Claude Code pull request review for 10X repos, gated on a single parsed verdict.
+description: Claude Code pull request review for 10X repos (hub review v14), gated on a single verdict.
 branding:
   icon: check-circle
   color: blue
 
 inputs:
-  anthropic_api_key:
-    description: Anthropic API key used by Claude Code.
+  claude_code_oauth_token:
+    description: Claude Code OAuth token.
     required: true
-  trusted_base_branch:
-    description: Branch the review standards and Claude config are read from. Defaults to the repository default branch.
-    required: false
-    default: ""
-  model:
-    description: Claude model passed to --model. Empty uses the Claude Code default.
-    required: false
-    default: ""
-  max_turns:
-    description: Maximum agent turns for one review.
-    required: false
-    default: "40"
-  claude_code_version:
-    description: Claude Code version to install.
-    required: false
-    default: "2.1.287"
-  path_to_claude_code_executable:
-    description: Use this Claude Code executable instead of installing one.
-    required: false
-    default: ""
 
 outputs:
   verdict:
-    description: approve, approve_with_notes, blocked, or skipped (draft PR).
-    value: ${{ steps.review.outputs.verdict }}
+    description: approved, approve_with_notes, blocked, or skipped (draft PR or nothing to review).
+    value: ${{ steps.finalize.outputs.verdict || steps.prep.outputs.verdict }}
   record_path:
-    description: Path of the review record JSON.
-    value: ${{ steps.review.outputs.record_path }}
+    description: Path of review-record.json.
+    value: ${{ steps.finalize.outputs.record_path }}
 
 runs:
   using: composite
   steps:
-    - id: review
+    - id: prep
       shell: bash
       env:
-        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
         GH_TOKEN: ${{ github.token }}
-        INPUT_TRUSTED_BASE_BRANCH: ${{ inputs.trusted_base_branch }}
-        INPUT_MODEL: ${{ inputs.model }}
-        INPUT_MAX_TURNS: ${{ inputs.max_turns }}
-        INPUT_CLAUDE_CODE_VERSION: ${{ inputs.claude_code_version }}
-        INPUT_PATH_TO_CLAUDE_CODE_EXECUTABLE: ${{ inputs.path_to_claude_code_executable }}
-      run: '"$GITHUB_ACTION_PATH/scripts/claude-review/review.sh"'
+      run: '"$GITHUB_ACTION_PATH/scripts/claude-review/prep.sh"'
 
-    - if: always() && steps.review.outputs.record_path != ''
+    - id: install
+      if: steps.prep.outputs.review == 'true' && steps.prep.outputs.skip_model != 'true'
+      shell: bash
+      env:
+        CLAUDE_CODE_ACTION_SHA: 1d6de8cb0c237e7c15e9e1bdf973826ebae490cc
+      run: '"$GITHUB_ACTION_PATH/scripts/claude-review/install.sh"'
+
+    - id: claude
+      if: steps.prep.outputs.review == 'true' && steps.prep.outputs.skip_model != 'true'
+      uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1
+      with:
+        claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
+        allowed_bots: claude, cursor
+        track_progress: true
+        use_sticky_comment: true
+        path_to_claude_code_executable: ${{ steps.install.outputs.claude_code_path }}
+        # --strict-mcp-config: ignore the repo's .mcp.json; only the action's own MCP servers load.
+        # --restricted: ignore repo settings files (PR hooks never run) and drop every built-in tool
+        # not named in --tools. Without Bash in --tools, the git commands below are unavailable.
+        claude_args: |
+          --strict-mcp-config
+          --restricted
+          --tools "Bash,Glob,Grep,Read"
+          --disallowedTools "Bash(git add:*),Bash(git commit:*),Bash(git rm:*)"
+          --model claude-opus-5-5
+          --max-turns 22
+          --allowedTools "Glob,Grep,LS,Read,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*)"
+        prompt: ${{ steps.prep.outputs.prompt }}
+
+    - id: finalize
+      if: steps.prep.outputs.review == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        CLAUDE_CODE_ACTION_SHA: 1d6de8cb0c237e7c15e9e1bdf973826ebae490cc
+        REVIEW_MODEL: claude-opus-5-5
+      run: '"$GITHUB_ACTION_PATH/scripts/claude-review/finalize.sh"'
+
+    - if: always() && steps.finalize.outputs.record_path != ''
       uses: actions/upload-artifact@v4
       with:
-        name: claude-review-record-attempt-${{ github.run_attempt }}
-        path: ${{ steps.review.outputs.record_path }}
+        name: claude-review-record-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ steps.finalize.outputs.record_path }}
+        retention-days: 90
+
+    - if: cancelled() && steps.prep.outputs.prior_comment_id != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: '"$GITHUB_ACTION_PATH/scripts/claude-review/cancel-cleanup.sh"'
