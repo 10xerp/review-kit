@@ -36,13 +36,20 @@ jobs:
       - uses: 10xerp/review-kit@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Docs-heavy repos (e.g. 10x-biz): review Markdown and docs/ changes.
+          # review_docs: true
 ```
 
 Keep the checkout's default credentials: claude-code-action fetches the PR branch with them before it switches to its own token.
 
 To require the review before merging, make the `claude-review` job a required status check. The action runs on Linux runners and needs `git`, `jq`, `curl` and Node.js 20 or later, all of which `ubuntu-latest` provides. The kit is meant for same-repository PRs: pull requests from forks don't receive secrets.
 
-**Input:** `claude_code_oauth_token` (required).
+**Inputs**
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `claude_code_oauth_token` | required | Claude Code OAuth token. |
+| `review_docs` | `false` | When `true`, review PRs that only change Markdown or files under `docs/` (for example PII checks in a docs repo). Image-only PRs still skip. Default `false` matches hub and billing (skip docs and images). |
 
 **Outputs:** `verdict` (`approved`, `approve_with_notes`, `blocked` or `skipped`) and `record_path`.
 
@@ -78,7 +85,7 @@ verdict=blocked
 
 **Scope.** These PRs are not reviewed, and the check passes:
 - draft PRs (marking the PR ready for review starts a review);
-- PRs that only change Markdown, `docs/`, or PNG, JPG and GIF images;
+- PRs that only change Markdown, `docs/`, or PNG, JPG and GIF images (unless `review_docs: true`; then Markdown and `docs/` are reviewed and only image-only PRs skip);
 - PRs that change the workflow file that runs the review.
 
 **Review modes.**

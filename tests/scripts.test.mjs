@@ -101,6 +101,7 @@ function parseOutputs(file) {
 }
 
 function step(t, script, env = {}) {
+  const inputReviewDocs = env.INPUT_REVIEW_DOCS ?? "false";
   const outputFile = join(t.root, `output-${script}-${Math.random()}`);
   const result = spawnSync("bash", [join(KIT, script)], {
     cwd: t.repo,
@@ -119,6 +120,7 @@ function step(t, script, env = {}) {
       GITHUB_RUN_ID: "555",
       GITHUB_SERVER_URL: "https://github.com",
       GH_TOKEN: "gh-test-token",
+      INPUT_REVIEW_DOCS: inputReviewDocs,
       ...env,
     },
   });
@@ -129,13 +131,13 @@ function step(t, script, env = {}) {
  * Runs the action's steps: prep, then (when the model runs) a simulated Claude that writes
  * `claudeBody` into the sticky comment, then finalize.
  */
-function review(t, { action = "synchronize", draft = false, comments = [], claudeBody, execution = true }) {
+function review(t, { action = "synchronize", draft = false, comments = [], claudeBody, execution = true, prepEnv = {} }) {
   writeFileSync(
     join(t.root, "event.json"),
     JSON.stringify({ action, pull_request: { number: 7, draft, head: { sha: t.headSha }, base: { ref: "main" } } }),
   );
   writeFileSync(join(t.stubs, "comments.json"), JSON.stringify(comments));
-  const prep = step(t, "prep.sh");
+  const prep = step(t, "prep.sh", prepEnv);
   const run = { prep, prompt: prep.outputs.prompt };
   if (prep.status !== 0 || prep.outputs.review !== "true") return run;
 
@@ -206,6 +208,21 @@ describe("skip rules", () => {
     const run = review(t, {});
     assert.equal(run.prep.outputs.review, "false");
     assert.match(run.prep.stdout, /No review: docs or images only/);
+  });
+
+  it("reviews docs-only PRs when review_docs is true", () => {
+    const t = setup([{ "README.md": "# Changed\n", "docs/hr/policy.md": "secret\n", "data/scenarios.csv": "a,b\n" }]);
+    const run = review(t, { claudeBody: "# Review: Approved\n", prepEnv: { INPUT_REVIEW_DOCS: "true" } });
+    assert.equal(run.prep.outputs.review, "true", run.prep.stderr);
+    assert.match(run.prompt, /REVIEW MODE: full/);
+    assertGate(run, "approved");
+  });
+
+  it("still skips image-only PRs when review_docs is true", () => {
+    const t = setup([{ "logo.png": "png", "docs/diagram.svg": "<svg/>" }]);
+    const run = review(t, { prepEnv: { INPUT_REVIEW_DOCS: "true" } });
+    assert.equal(run.prep.outputs.review, "false");
+    assert.match(run.prep.stdout, /No review: images only/);
   });
 
   it("skips PRs that change the workflow running the review, even with code changes", () => {
