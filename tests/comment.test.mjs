@@ -45,6 +45,11 @@ describe("review metadata", () => {
     assert.deepEqual(readMeta(stamped), { last_sha: "abc123", run_id: "77", verdict: "blocked" });
   });
 
+  it("adds extra metadata lines such as max_id", () => {
+    const stamped = stampMeta("# Review: Approved", "abc", "1", "approved", { max_id: 7, empty: "" });
+    assert.deepEqual(readMeta(stamped), { last_sha: "abc", run_id: "1", verdict: "approved", max_id: "7" });
+  });
+
   it("replaces an existing meta block when stamping again", () => {
     const once = stampMeta("# Review: Approved", "aaa", "1", "approved");
     const twice = stampMeta(once, "bbb", "2", "approved");

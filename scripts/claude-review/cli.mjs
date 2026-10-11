@@ -43,6 +43,7 @@ const commands = {
       prior_comment_id: comment?.id ?? "",
       last_sha: meta.last_sha ?? "",
       prior_verdict: meta.verdict ?? "",
+      max_id: Number(meta.max_id ?? 0) || 0,
       open_findings: openFindingsWithReplies(stripMeta(body), parseReplies(comments)),
     });
   },
@@ -121,10 +122,12 @@ const commands = {
       commentId = comment.id;
     }
 
-    const assigned = assignFindingIds(body, priorBody);
+    const assigned = assignFindingIds(body, priorBody, { maxId: Number(state.max_id ?? 0) || 0 });
     const review = resolveReview(assigned.body, verdict);
     if (!review.verdict) throw new Error("Could not parse review verdict.");
-    const stamped = stampMeta(review.body, state.head_sha, env.GITHUB_RUN_ID, review.verdict);
+    const stamped = stampMeta(review.body, state.head_sha, env.GITHUB_RUN_ID, review.verdict, {
+      max_id: assigned.maxId,
+    });
 
     let execution = {};
     if (env.EXECUTION_FILE) {
@@ -149,6 +152,8 @@ const commands = {
       verdict: review.verdict,
       findings: assigned.findings,
       fixedIds: assigned.fixedIds,
+      dismissedIds: assigned.dismissedIds,
+      carriedIds: assigned.carriedIds,
       replies: parseReplies(comments),
       model: env.REVIEW_MODEL,
       claudeCodeVersion: existsSync(installMeta) ? readJson(installMeta).version : "",
@@ -168,6 +173,7 @@ const commands = {
       comment_id: commentId,
       source,
       verdict: review.verdict,
+      carried_ids: assigned.carriedIds,
       summary: verdictSummary(review.verdict),
       comment_length: stamped.length,
       patch_comment: true,

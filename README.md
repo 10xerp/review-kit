@@ -1,6 +1,6 @@
 # review-kit
 
-A composite GitHub Action that runs the 10X Claude pull request review (hub's review v14). Claude posts one sticky review comment on the PR, and the check fails when the review is **Blocked**.
+A composite GitHub Action that runs the 10X Claude pull request review. Claude posts one sticky review comment on the PR, and the check fails when the review is **Blocked** or when the review could not run on a PR that changes the review tooling.
 
 ## Setup
 
@@ -33,7 +33,9 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: 10xerp/review-kit@v1
+      # Pin a commit, not a tag: this code runs with the OAuth token and a write-scoped
+      # GITHUB_TOKEN on every PR. Bump the SHA on purpose, in a reviewed PR.
+      - uses: 10xerp/review-kit@<commit sha> # v2
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Docs-heavy repos (e.g. 10x-biz): review Markdown and docs/ changes.
@@ -42,14 +44,17 @@ jobs:
 
 Keep the checkout's default credentials: claude-code-action fetches the PR branch with them before it switches to its own token.
 
-To require the review before merging, make the `claude-review` job a required status check. The action runs on Linux runners and needs `git`, `jq`, `curl` and Node.js 20 or later, all of which `ubuntu-latest` provides. The kit is meant for same-repository PRs: pull requests from forks don't receive secrets.
+To require the review before merging, make the `claude-review` job a required status check. With the default `tooling_change: fail`, a PR that changes the review workflow fails that check (the model cannot review it), so give repository admins a `pull_request` bypass in the branch ruleset: they merge such a PR with "Merge without waiting for requirements", which the PR timeline records as a bypass. Nothing else merges unreviewed. The action runs on Linux runners and needs `git`, `jq`, `curl` and Node.js 20 or later, all of which `ubuntu-latest` provides. The kit is meant for same-repository PRs: pull requests from forks don't receive secrets.
 
 **Inputs**
 
 | Input | Default | Description |
 | --- | --- | --- |
 | `claude_code_oauth_token` | required | Claude Code OAuth token. |
-| `review_docs` | `false` | When `true`, review PRs that only change Markdown or files under `docs/` (for example PII checks in a docs repo). Image-only PRs still skip. Default `false` matches hub and billing (skip docs and images). |
+| `review_docs` | `false` | When `true`, review PRs that only change Markdown or files under `docs/` (for example PII checks in a docs repo, or a repo whose review standards and agent skills live in Markdown). Image-only PRs still skip. Default `false` skips docs and images. |
+| `tooling_change` | `fail` | What the check does when the model cannot run because the PR changes the review workflow, or its copy of that workflow differs from the base branch. `fail` fails the check so a person merges with an explicit, logged bypass. `pass` passes the check with no review (the pre-v2 behavior). |
+| `model` | `claude-opus-5-5` | Claude model for the review. |
+| `max_turns` | `22` | Maximum agent turns for one review. The records show full reviews using 5 to 9 turns; raise this with a stricter prompt in the standards if reviews need to read more. |
 
 **Outputs:** `verdict` (`approved`, `approve_with_notes`, `blocked` or `skipped`) and `record_path`.
 
@@ -69,13 +74,14 @@ Fixed: F1
 - [F3] lib/services/y.ts:20 [maintainability]: duplicated query; reuse getY()
 ```
 
-The heading is one of `# Review: Approved`, `# Review: Approve with notes` or `# Review: Blocked`. Finding lines are `- path:line [category]: text`; the kit stamps a stable ID (`[F1]`, `[F2]`, …) on each one. `Fixed: F#` lines mark earlier findings as resolved. When the kit finalizes the comment, it appends hidden metadata that tools such as hub's `pr` skill read:
+The heading is one of `# Review: Approved`, `# Review: Approve with notes` or `# Review: Blocked`. Finding lines are `- path:line [category]: text`; the kit stamps a stable ID (`[F1]`, `[F2]`, …) on each one. IDs never repeat on a PR: the highest one used so far is kept in the metadata (`max_id`), so a review with no findings does not restart the numbering. `Fixed: F#` closes an earlier finding that was fixed; `Dismissed: F#` closes one after a `/fp` or `/wontfix` reply. When the kit finalizes the comment, it appends hidden metadata that tools such as hub's `pr` skill read:
 
 ```
 <!-- claude-review:v1
 last_sha=<reviewed head commit>
 run_id=<workflow run id>
 verdict=blocked
+max_id=7
 -->
 ```
 
@@ -83,29 +89,33 @@ verdict=blocked
 
 **Verdict gate.** The verdict is read once from the `# Review:` line. If anything is listed under `## Issues (Must Fix)`, the verdict is Blocked regardless of the heading, and the heading is rewritten to `# Review: Blocked`. The heading, the hidden metadata, the record and the check result therefore always agree. Blocked fails the check. A review without a parseable `# Review:` line also fails the check.
 
+**Open Must Fix findings stay open.** A Must Fix from the previous review closes only through a `Fixed: F#` or `Dismissed: F#` line in the new review. One the new review neither closes nor re-lists is carried forward under `## Issues (Must Fix)` with the note "still open from an earlier review", and the PR stays Blocked. A push that does not touch the finding therefore cannot clear it, whatever the model writes. Suggestions are not carried: the standards ask the model not to repeat them.
+
 **Scope.** These PRs are not reviewed, and the check passes:
 - draft PRs (marking the PR ready for review starts a review);
-- PRs that only change Markdown, `docs/`, or PNG, JPG and GIF images (unless `review_docs: true`; then Markdown and `docs/` are reviewed and only image-only PRs skip);
-- PRs that change the workflow file that runs the review.
+- PRs that only change Markdown, `docs/`, or PNG, JPG and GIF images (unless `review_docs: true`; then Markdown and `docs/` are reviewed and only image-only PRs skip).
+
+These PRs are not reviewed either, because claude-code-action refuses to start, and the check **fails** unless `tooling_change: pass`:
+- PRs that change the workflow file that runs the review;
+- PRs whose copy of that workflow differs from the base branch (merge the base branch to fix that).
 
 **Review modes.**
 - *Full:* on `opened`, `reopened` and `ready_for_review`, on the first review of a PR, and when the last reviewed commit is no longer in the history (after a force push). Claude starts from `git diff origin/<base>...HEAD`.
 - *Incremental:* on later pushes. Claude starts from `git diff <last reviewed>..HEAD`, limited to the files whose PR changes moved since then. It gets the open Must Fix findings and any replies to them, and acknowledges resolved ones with `Fixed: F#`.
 - *Carry-forward:* when a push doesn't change what the PR itself changes (for example, a merge from the base branch, or a re-run on a commit that was already reviewed), the model is skipped. The previous review is stamped with the new commit, and its verdict is applied again, so a Blocked PR stays Blocked.
 
-**Replies.** Comment `/fp F2 reason`, `/nit F3` or `/wontfix F1 reason` on the PR. Replies are passed to Claude with the open findings on the next review and kept in the record. They don't change the current check.
+**Replies.** Comment `/fp F2 reason`, `/nit F3` or `/wontfix F1 reason` on the PR. Replies are passed to Claude with the open findings on the next review and kept in the record. They don't change the current check: the next review closes the finding with `Dismissed: F#` if Claude agrees, or carries it forward if not.
 
-**Record.** Each review uploads a `claude-review-record-<pr>-<run id>-<attempt>` artifact, kept for 90 days. It is `review-record.json` (schema 1) and contains the verdict, mode, findings with IDs and open or fixed status, fixed IDs, replies, model, Claude Code version, action and standards SHAs, and metrics. The metrics are model time (`duration_ms`), turns, cost, queue time, wall time, and phase timestamps and durations (`prep_s`, `install_s`, `model_s`, `finalize_s`, `direct_install_s`).
+**Record.** Each review uploads a `claude-review-record-<pr>-<run id>-<attempt>` artifact, kept for 90 days. It is `review-record.json` (schema 1) and contains the verdict, mode, findings with IDs and status (`open`, `carried`, `fixed` or `dismissed`), fixed, dismissed and carried IDs, replies, model, Claude Code version, action and standards SHAs, and metrics. The metrics are model time (`duration_ms`), turns, cost, queue time, wall time, and phase timestamps and durations (`prep_s`, `install_s`, `model_s`, `finalize_s`, `direct_install_s`).
 
-**Claude Code.** The review runs [claude-code-action](https://github.com/anthropics/claude-code-action) at a pinned commit, with `claude-opus-5-5` and at most 22 turns. The kit downloads the Claude Code release that this commit pins and checks it against the release manifest's sha256. If the download fails, the action installs Claude Code itself.
+**Claude Code.** The review runs [claude-code-action](https://github.com/anthropics/claude-code-action) at a pinned commit, with the `model` input (`claude-opus-5-5` by default) and at most `max_turns` turns (22). The kit downloads the Claude Code release that this commit pins and checks it against the release manifest's sha256. If the download fails, the action installs Claude Code itself.
 
-**Security.**
-- The review standards come from the PR's base branch. `.claude/` and `CLAUDE.md` are also replaced by their base-branch versions before Claude starts.
-- Claude runs with `--strict-mcp-config`, so the repo's `.mcp.json` is ignored.
-- Claude also runs with `--restricted`, so repo settings files and their hooks are ignored.
-- Read, Grep and Glob are denied for `.git/**` paths (so Claude cannot read `.git/config`, where the action stores its token). `git diff` and the other allowed Bash git commands still work.
-- The only tools are Read, Grep, Glob and Bash restricted to `git diff`, `git log`, `git show` and `git rev-parse`. `git add`, `git commit` and `git rm` are denied.
-- Only review comments written by `claude[bot]` are trusted.
+**Security.** The kit is built for same-repository PRs from people and bots you already trust with the repo. Its job is to stop the PR from steering its own review, not to contain a hostile author: anyone who can open a PR in the repo can already read its secrets by editing a workflow.
+- The review standards come from the PR's base branch. `.claude/`, `CLAUDE.md`, `CLAUDE.local.md` and every nested `CLAUDE.md` are replaced by their base-branch versions (or removed) before Claude starts, so a PR cannot add instructions Claude would load.
+- Claude runs with `--strict-mcp-config`, so the repo's `.mcp.json` is ignored, and with `--restricted`, so repo settings files and their hooks are ignored.
+- The only tools are Read, Grep, Glob and Bash restricted to `git diff`, `git log`, `git show` and `git rev-parse`. `git add`, `git commit`, `git rm` and `git diff --no-index` are denied, and Read, Grep and Glob are denied under `.git/**` (where the action keeps its token) and `/proc/**` (where process environments are readable).
+- Those denies narrow Claude's reach but are not a secrets boundary: a git command with the right flags can still print a file on the runner, and the tokens in the job's environment are inherited by Claude's shell. What limits the damage is that Claude's only output is the PR comment, and that the tokens expire with the job. Do not run the kit on PRs from people you would not give the repo's secrets to.
+- Only review comments written by `claude[bot]` are trusted, and a finding closes only through an explicit `Fixed:` or `Dismissed:` line in such a comment.
 
 **Cancellation.** If a run is cancelled (for example by a newer push) while the comment still shows Claude's progress placeholder, the previous review is restored.
 

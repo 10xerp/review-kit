@@ -36,9 +36,14 @@ export function stripMeta(body) {
   return body.slice(0, start).trimEnd();
 }
 
-export function stampMeta(body, headSha, runId, verdict) {
+/** `extra` adds further `key=value` lines, such as `max_id` (highest finding ID used on the PR). */
+export function stampMeta(body, headSha, runId, verdict, extra = {}) {
   const clean = stripMeta(body);
-  return `${clean}\n\n${META_START}\nlast_sha=${headSha}\nrun_id=${runId}\nverdict=${verdict}\n${META_END}\n`;
+  const more = Object.entries(extra)
+    .filter(([, v]) => v !== undefined && v !== null && v !== "")
+    .map(([k, v]) => `${k}=${v}\n`)
+    .join("");
+  return `${clean}\n\n${META_START}\nlast_sha=${headSha}\nrun_id=${runId}\nverdict=${verdict}\n${more}${META_END}\n`;
 }
 
 export function stripWorking(body) {
