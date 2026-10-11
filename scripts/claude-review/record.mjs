@@ -79,6 +79,14 @@ export function parseExecutionFile(raw) {
 
 export function buildReviewRecord(input) {
   const fixedSet = new Set(input.fixedIds);
+  const dismissedSet = new Set(input.dismissedIds ?? []);
+  const carriedSet = new Set(input.carriedIds ?? []);
+  const status = (f) => {
+    if (!f.id) return "open";
+    if (dismissedSet.has(f.id)) return "dismissed";
+    if (fixedSet.has(f.id)) return "fixed";
+    return carriedSet.has(f.id) ? "carried" : "open";
+  };
   return {
     schema: 1,
     repo: input.repo,
@@ -98,9 +106,11 @@ export function buildReviewRecord(input) {
       line: f.line,
       category: f.category,
       text: f.text,
-      status: f.id && fixedSet.has(f.id) ? "fixed" : "open",
+      status: status(f),
     })),
     fixed_ids: input.fixedIds,
+    dismissed_ids: input.dismissedIds ?? [],
+    carried_ids: input.carriedIds ?? [],
     replies: input.replies,
     model: input.model,
     claude_code_version: input.claudeCodeVersion,

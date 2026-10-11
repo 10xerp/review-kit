@@ -14,6 +14,22 @@ inputs:
       PRs still skip. Default false keeps hub-style scope (skip docs and images).
     required: false
     default: "false"
+  tooling_change:
+    description: >-
+      What the check does when the model cannot run because the PR changes the workflow that runs
+      this review, or that workflow differs from the base branch (claude-code-action refuses both).
+      "fail" (default) fails the check so a person merges such a PR with an explicit, logged bypass;
+      "pass" passes it without a review, the pre-v2 behavior.
+    required: false
+    default: "fail"
+  model:
+    description: Claude model for the review.
+    required: false
+    default: claude-opus-5-5
+  max_turns:
+    description: Maximum agent turns for one review.
+    required: false
+    default: "22"
 
 outputs:
   verdict:
@@ -31,6 +47,7 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         INPUT_REVIEW_DOCS: ${{ inputs.review_docs }}
+        INPUT_TOOLING_CHANGE: ${{ inputs.tooling_change }}
       run: '"$GITHUB_ACTION_PATH/scripts/claude-review/prep.sh"'
 
     - id: install
@@ -56,20 +73,26 @@ runs:
                 "Read(.git/**)",
                 "Read(**/.git/**)",
                 "Grep(.git/**)",
-                "Glob(.git/**)"
+                "Glob(.git/**)",
+                "Read(//proc/**)",
+                "Grep(//proc/**)",
+                "Glob(//proc/**)",
+                "Bash(git diff --no-index:*)"
               ]
             }
           }
         # --strict-mcp-config: ignore the repo's .mcp.json; only the action's own MCP servers load.
         # --restricted: ignore repo settings files (PR hooks never run) and drop every built-in tool
         # not named in --tools. Without Bash in --tools, the git commands below are unavailable.
+        # The denies above and below narrow what Claude reaches, but Bash with any git command
+        # can still print runner files, so they are not a secrets boundary (see README, Security).
         claude_args: |
           --strict-mcp-config
           --restricted
           --tools "Bash,Glob,Grep,Read"
-          --disallowedTools "Bash(git add:*),Bash(git commit:*),Bash(git rm:*)"
-          --model claude-opus-5-5
-          --max-turns 22
+          --disallowedTools "Bash(git add:*),Bash(git commit:*),Bash(git rm:*),Bash(git diff --no-index:*)"
+          --model ${{ inputs.model }}
+          --max-turns ${{ inputs.max_turns }}
           --allowedTools "Glob,Grep,LS,Read,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*)"
         prompt: ${{ steps.prep.outputs.prompt }}
 
@@ -81,7 +104,7 @@ runs:
         EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         WORKFLOW_VALIDATION_SKIP: ${{ steps.prep.outputs.skip_workflow_validation }}
         CLAUDE_CODE_ACTION_SHA: 1d6de8cb0c237e7c15e9e1bdf973826ebae490cc
-        REVIEW_MODEL: claude-opus-5-5
+        REVIEW_MODEL: ${{ inputs.model }}
       run: '"$GITHUB_ACTION_PATH/scripts/claude-review/finalize.sh"'
 
     - if: always() && steps.finalize.outputs.record_path != ''

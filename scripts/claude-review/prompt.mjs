@@ -18,7 +18,7 @@ export function openFindingsWithReplies(priorBody, replies) {
 export function buildPrompt({ repo, pr, headSha, baseRef, mode, diffInstruction, lastSha, openFindings, standards }) {
   const incremental =
     mode === "incremental"
-      ? `This is an incremental re-review since ${lastSha}. Do not repeat findings from the prior review unless they still apply. Acknowledge each fixed Must Fix with a line \`Fixed: F#\` (finding id). Prior open findings:\n${openFindings}`
+      ? `This is an incremental re-review since ${lastSha}. Every prior open Must Fix below stays open, and keeps the PR Blocked, until you close it: write \`Fixed: F#\` after checking the fix landed, or \`Dismissed: F#\` when a /fp or /wontfix reply convinces you. Re-list a still-open one under Issues only to update its wording; leaving it out does not close it. Do not repeat Suggestions from the prior review. Prior open findings:\n${openFindings}`
       : "";
   return [
     `REPO: ${repo}`,

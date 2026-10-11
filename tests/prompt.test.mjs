@@ -49,8 +49,10 @@ Block test.
     });
     assert.ok(
       prompt.includes(
-        "This is an incremental re-review since lastsha. Do not repeat findings from the prior review unless they still apply. " +
-          "Acknowledge each fixed Must Fix with a line `Fixed: F#` (finding id). Prior open findings:\n- [F1] src/a.ts:1 [security]: leak\n",
+        "This is an incremental re-review since lastsha. Every prior open Must Fix below stays open, and keeps the PR Blocked, until you close it: " +
+          "write `Fixed: F#` after checking the fix landed, or `Dismissed: F#` when a /fp or /wontfix reply convinces you. " +
+          "Re-list a still-open one under Issues only to update its wording; leaving it out does not close it. " +
+          "Do not repeat Suggestions from the prior review. Prior open findings:\n- [F1] src/a.ts:1 [security]: leak\n",
       ),
     );
     assert.ok(prompt.includes("Start from `git diff last..HEAD -- src/a.ts` (PR base `main`)."));
