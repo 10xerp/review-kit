@@ -33,7 +33,10 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: 10xerp/review-kit@v1
+      # Pin a commit, not a tag: this code runs with the OAuth token and a write-scoped
+      # GITHUB_TOKEN on every PR. Bump the SHA on purpose, in a PR. The `# v2` comment
+      # names the release tag the commit carries; tags only mark releases here.
+      - uses: 10xerp/review-kit@b4cf21ec958bc976f2f78558d990e62c4d82f152 # v2
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Docs-heavy repos (e.g. 10x-biz): review Markdown and docs/ changes.
