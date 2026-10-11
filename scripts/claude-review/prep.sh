@@ -44,6 +44,9 @@ if [[ "$(jq -r .review <<< "$SCOPE")" != true ]]; then
   if [[ "$(jq -r .changes_review_tooling <<< "$SCOPE")" == true ]]; then
     step_summary "This PR changes the review workflow ($WORKFLOW_PATH), so the model is skipped."
     echo "::notice::Review tooling changed on PR: model skipped (check passes)."
+  elif [[ "$(jq -r .images_only_skip <<< "$SCOPE")" == true ]]; then
+    step_summary "This PR only changes images."
+    echo "::notice::No review: images only."
   else
     step_summary "This PR only changes docs or images."
     echo "::notice::No review: docs or images only."

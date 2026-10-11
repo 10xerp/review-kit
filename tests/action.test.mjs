@@ -45,4 +45,10 @@ describe("action.yml", () => {
   it("skips install and Claude when workflow validation would fail", () => {
     assert.match(action, /skip_workflow_validation != 'true'/);
   });
+
+  it("exposes review_docs for docs-heavy repos", () => {
+    assert.match(action, /^\s+review_docs:\n/m);
+    assert.match(action, /default: "false"/);
+    assert.match(action, /INPUT_REVIEW_DOCS: \$\{\{ inputs\.review_docs \}\}/);
+  });
 });

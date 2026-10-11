@@ -26,7 +26,10 @@ function phaseDurations(phases) {
 const commands = {
   // stdin: files changed by the PR, one per line
   scope(workflowPath) {
-    return JSON.stringify(reviewScope(readFileSync(0, "utf8").split("\n"), workflowPath));
+    const reviewDocs = env.INPUT_REVIEW_DOCS === "true";
+    return JSON.stringify(
+      reviewScope(readFileSync(0, "utf8").split("\n"), workflowPath, { reviewDocs }),
+    );
   },
 
   // Writes the previous review comment, metadata included, to bodyPath.
