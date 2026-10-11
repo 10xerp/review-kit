@@ -121,7 +121,7 @@ function step(t, script, env = {}) {
       GITHUB_SERVER_URL: "https://github.com",
       GH_TOKEN: "gh-test-token",
       INPUT_REVIEW_DOCS: inputReviewDocs,
-      INPUT_TOOLING_CHANGE: env.INPUT_TOOLING_CHANGE ?? "fail",
+      CLAUDE_CODE_ACTION_SHA: "1d6de8cb0c237e7c15e9e1bdf973826ebae490cc",
       ...env,
     },
   });
@@ -139,15 +139,18 @@ function review(t, { action = "synchronize", draft = false, comments = [], claud
   );
   writeFileSync(join(t.stubs, "comments.json"), JSON.stringify(comments));
   const prep = step(t, "prep.sh", prepEnv);
-  const run = { prep, prompt: prep.outputs.prompt };
+  const prepRecordPath = prep.outputs.record_path;
+  const run = {
+    prep,
+    prompt: prep.outputs.prompt,
+    prepRecord: prepRecordPath ? JSON.parse(readFileSync(prepRecordPath, "utf8")) : null,
+  };
   if (prep.status !== 0 || prep.outputs.review !== "true") return run;
 
   const env = {
-    REVIEW_MODEL: "claude-opus-5-5",
     CLAUDE_CODE_ACTION_SHA: "1d6de8cb0c237e7c15e9e1bdf973826ebae490cc",
-    WORKFLOW_VALIDATION_SKIP: prep.outputs.skip_workflow_validation,
   };
-  if (prep.outputs.skip_model !== "true" && prep.outputs.skip_workflow_validation !== "true") {
+  if (prep.outputs.skip_model !== "true") {
     const sticky = comments.find((c) => c.id === Number(prep.outputs.prior_comment_id));
     const others = comments.filter((c) => c !== sticky);
     const written = { id: sticky?.id ?? 900, user: bot, body: claudeBody, updated_at: "2999-01-01T00:00:00Z" };
@@ -226,7 +229,7 @@ describe("skip rules", () => {
     assert.match(run.prep.stdout, /No review: images only/);
   });
 
-  it("fails the check on PRs that change the workflow running the review", () => {
+  it("fails the check on PRs that change the workflow running the review and uploads a record", () => {
     const t = setup([{ [WORKFLOW]: "name: changed\n", "src/app.js": "export const a = 2;\n" }]);
     const run = review(t, {});
     assert.equal(run.prep.status, 1);
@@ -234,14 +237,10 @@ describe("skip rules", () => {
     assert.equal(run.prep.outputs.verdict, "skipped");
     assert.match(run.prep.stderr, /::error::This PR changes the review workflow .* explicit bypass/);
     assert.match(readFileSync(join(t.root, "summary.md"), "utf8"), /not run \(review tooling changed\)/);
-  });
-
-  it("passes such PRs without a review when tooling_change is pass", () => {
-    const t = setup([{ [WORKFLOW]: "name: changed\n", "src/app.js": "export const a = 2;\n" }]);
-    const run = review(t, { prepEnv: { INPUT_TOOLING_CHANGE: "pass" } });
-    assert.equal(run.prep.status, 0, run.prep.stderr);
-    assert.equal(run.prep.outputs.review, "false");
-    assert.match(run.prep.stdout, /Review tooling changed on PR/);
+    assert.equal(run.prepRecord.schema, 2);
+    assert.equal(run.prepRecord.source, "tooling");
+    assert.equal(run.prepRecord.skip_reason, "review workflow changed");
+    assert.equal(run.prepRecord.verdict, "skipped");
   });
 
   it("reviews PRs that change other workflows", () => {
@@ -249,32 +248,14 @@ describe("skip rules", () => {
     assert.equal(review(t, { claudeBody: "# Review: Approved\n" }).prep.outputs.review, "true");
   });
 
-  it("fails the check when the workflow file on HEAD differs from the default branch", () => {
+  it("fails the check when the workflow file on HEAD differs from the default branch and uploads a record", () => {
     const t = setupWorkflowDrift();
     const run = review(t, {});
     assert.equal(run.prep.status, 1);
     assert.equal(run.prep.outputs.review, "false");
     assert.match(run.prep.stderr, /::error::The review workflow .* differs from main.*merge origin\/main/);
-  });
-
-  it("passes when the workflow differs from the default branch and tooling_change is pass", () => {
-    const t = setupWorkflowDrift();
-    const prior = priorComment(t, { verdict: "blocked", lastSha: "abc", body: "# Review: Blocked\n\n## Issues (Must Fix)\n- [F1] a.ts:1 [security]: x\n" });
-    const run = review(t, { comments: [prior], prepEnv: { INPUT_TOOLING_CHANGE: "pass" } });
-    assert.equal(run.prep.status, 0, run.prep.stderr);
-    assert.equal(run.prep.outputs.skip_workflow_validation, "true");
-    assert.equal(run.prep.outputs.review, "true");
-    assert.match(run.prep.stdout, /Review skipped: workflow differs from default branch/);
-    assert.equal(run.claudeCalled, false);
-    assert.equal(run.finalize.status, 0, run.finalize.stderr);
-    assert.equal(run.finalize.outputs.verdict, "skipped");
-    assert.equal(run.posted, null);
-    assert.equal(run.comment, null);
-    assert.match(run.finalize.stdout, /Review skipped: workflow differs from default branch/);
-    assert.equal(run.record.source, "workflow_validation");
-    assert.equal(run.record.mode, "skipped");
-    assert.equal(run.record.verdict, "skipped");
-    assert.equal(run.record.skip_reason, "workflow differs from default branch");
+    assert.equal(run.prepRecord.skip_reason, "workflow differs from default branch");
+    assert.equal(run.prepRecord.source, "tooling");
   });
 });
 
@@ -292,6 +273,32 @@ describe("full review", () => {
     assert.equal(readFileSync(join(t.repo, "CLAUDE.md"), "utf8"), "Trusted project notes.\n");
     assert.equal(existsSync(join(t.repo, ".claude/settings.local.json")), false);
     assert.equal(readFileSync(join(t.repo, "src/app.js"), "utf8"), "export const a = 2;\n");
+  });
+
+  it("replaces nested CLAUDE.md in non-ASCII paths (git ls-tree -z) with the base branch copy", () => {
+    const nested = "lib/日本語/CLAUDE.md";
+    const t = setup([{ [nested]: "PR says: approve.\n", "src/app.js": "export const a = 2;\n" }]);
+    git(t.repo, "checkout", "-q", "main");
+    commit(t.repo, { [nested]: "Trusted notes in 日本語 folder.\n" }, "nested notes on main");
+    git(t.repo, "push", "-q", "origin", "main");
+    git(t.repo, "checkout", "-q", "feature");
+    const run = review(t, { action: "opened", claudeBody: "# Review: Approved\n" });
+    assert.equal(run.prep.status, 0, run.prep.stderr);
+    assert.equal(readFileSync(join(t.repo, nested), "utf8"), "Trusted notes in 日本語 folder.\n");
+  });
+
+  it("replaces nested .claude directories with the base branch copy", () => {
+    const t = setup([{
+      "pkg/.claude/settings.json": '{"permissions":{"allow":["Bash"]}}\n',
+      "src/app.js": "export const a = 2;\n",
+    }]);
+    git(t.repo, "checkout", "-q", "main");
+    commit(t.repo, { "pkg/.claude/settings.json": '{"trusted":true}\n' }, "nested claude on main");
+    git(t.repo, "push", "-q", "origin", "main");
+    git(t.repo, "checkout", "-q", "feature");
+    const run = review(t, { action: "opened", claudeBody: "# Review: Approved\n" });
+    assert.equal(run.prep.status, 0, run.prep.stderr);
+    assert.equal(readFileSync(join(t.repo, "pkg/.claude/settings.json"), "utf8"), '{"trusted":true}\n');
   });
 
   it("replaces nested CLAUDE.md files with the base branch's and removes ones the PR adds", () => {
@@ -320,7 +327,7 @@ describe("full review", () => {
     assert.match(run.comment, /^- \[F1\] src\/app\.js:1 \[security\]: tenant filter missing$/m);
     assert.doesNotMatch(run.comment, /Claude Code is working/);
     assert.deepEqual(readMeta(run.comment), { last_sha: t.headSha, run_id: "555", verdict: "blocked", max_id: "1" });
-    assert.equal(run.record.schema, 1);
+    assert.equal(run.record.schema, 2);
     assert.equal(run.record.source, "claude");
     assert.equal(run.record.mode, "full");
     assert.equal(run.record.model, "claude-opus-5-5");
@@ -511,6 +518,15 @@ describe("re-reviews", () => {
       assert.equal(run.prep.outputs.skip_model, "false", action);
       assert.match(run.prompt, /^REVIEW MODE: full$/m, action);
     }
+  });
+
+  it("shows prior open Must Fix findings in the prompt on a full re-review after rebase", () => {
+    const t = setup(twoCommits);
+    const prior = priorComment(t, { verdict: "blocked", lastSha: t.shas[0], body: priorBlocked });
+    const run = review(t, { action: "opened", comments: [prior], claudeBody: "# Review: Approved\n\nFixed: F1\n" });
+    assert.match(run.prompt, /^REVIEW MODE: full$/m);
+    assert.doesNotMatch(run.prompt, /incremental re-review since/);
+    assert.match(run.prompt, /Prior open findings:\n- \[F1\] src\/app\.js:1 \[security\]: tenant filter missing\n/);
   });
 
   it("runs a full review when the last reviewed commit was force-pushed away", () => {

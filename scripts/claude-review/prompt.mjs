@@ -16,10 +16,12 @@ export function openFindingsWithReplies(priorBody, replies) {
 }
 
 export function buildPrompt({ repo, pr, headSha, baseRef, mode, diffInstruction, lastSha, openFindings, standards }) {
-  const incremental =
-    mode === "incremental"
-      ? `This is an incremental re-review since ${lastSha}. Every prior open Must Fix below stays open, and keeps the PR Blocked, until you close it: write \`Fixed: F#\` after checking the fix landed, or \`Dismissed: F#\` when a /fp or /wontfix reply convinces you. Re-list a still-open one under Issues only to update its wording; leaving it out does not close it. Do not repeat Suggestions from the prior review. Prior open findings:\n${openFindings}`
-      : "";
+  const open = openFindings?.trim() ?? "";
+  const carryRules =
+    "Every prior open Must Fix below stays open, and keeps the PR Blocked, until you close it: write `Fixed: F#` after checking the fix landed, or `Dismissed: F#` when a /fp or /wontfix reply convinces you. Re-list a still-open one under Issues only to update its wording; leaving it out does not close it. Do not repeat Suggestions from the prior review.";
+  const priorFindingsBlock = open
+    ? `${mode === "incremental" ? `This is an incremental re-review since ${lastSha}. ` : ""}${carryRules} Prior open findings:\n${open}`
+    : "";
   return [
     `REPO: ${repo}`,
     `PR NUMBER: ${pr}`,
@@ -31,7 +33,7 @@ export function buildPrompt({ repo, pr, headSha, baseRef, mode, diffInstruction,
     "",
     `Start from \`${diffInstruction}\` (PR base \`${baseRef}\`). Read every file touched in that diff in full (not only hunks). Use Grep for callers of changed public APIs.`,
     "",
-    incremental,
+    priorFindingsBlock,
     "",
     "Post the review as the sticky PR comment (update in place). First line must be exactly one of:",
     "`# Review: Approved`, `# Review: Approve with notes`, or `# Review: Blocked`.",

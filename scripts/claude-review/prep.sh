@@ -39,28 +39,36 @@ WORKFLOW_PATH="${GITHUB_WORKFLOW_REF:?}"
 WORKFLOW_PATH="${WORKFLOW_PATH%@*}"
 WORKFLOW_PATH="${WORKFLOW_PATH#"$GITHUB_REPOSITORY"/}"
 # A PR that changes the workflow running this review, or whose copy of it differs from the base
-# branch, gets no model run: claude-code-action refuses to start then. With tooling_change=fail
-# (the default) the check fails and a person merges such a PR with an explicit, logged bypass;
-# with tooling_change=pass it passes without a review.
-TOOLING_CHANGE="${INPUT_TOOLING_CHANGE:-fail}"
-tooling_unreviewed() {
-  step_summary "## Claude review: not run ($1)"
-  step_summary "$2"
-  if [[ "$TOOLING_CHANGE" == pass ]]; then
-    echo "::notice::$2 Model skipped (check passes: tooling_change=pass)."
-    return 0
+# branch, gets no model run: claude-code-action refuses to start then. The check fails and a person
+# merges such a PR with an explicit, logged bypass.
+write_tooling_record() {
+  local skip_reason="$1"
+  fetch_comments "$PR_NUMBER" > "$WORK/comments.json"
+  local standards_sha=""
+  if git show "$BASE:$STANDARDS_PATH" > "$WORK/standards.md" 2> /dev/null; then
+    standards_sha="$(sha256sum "$WORK/standards.md" | cut -c1-64)"
   fi
+  cli tooling-record "$WORK" "$skip_reason" "$PR_NUMBER" "$HEAD_SHA" "$PR_BASE" "$BASE_SHA" \
+    "$RUN_STARTED" "$JOB_STARTED" "$standards_sha" "$WORK/comments.json" > /dev/null
+  output record_path "$WORK/review-record.json"
+}
+
+tooling_unreviewed() {
+  local title="$1"
+  local summary="$2"
+  local skip_reason="$3"
+  step_summary "## Claude review: not run ($title)"
+  step_summary "$summary"
   output review false
   output verdict skipped
-  fail "$2 Model skipped. The check fails because tooling_change=fail: a maintainer reviews and merges this PR with an explicit bypass, or merge origin/$PR_BASE if only the base moved."
+  write_tooling_record "$skip_reason"
+  fail "$summary Model skipped. The check fails: a maintainer reviews and merges this PR with an explicit bypass, or merge origin/$PR_BASE if only the base moved."
 }
 
 SCOPE="$(git diff --name-only "$BASE...HEAD" | cli scope "$WORKFLOW_PATH")"
 if [[ "$(jq -r .review <<< "$SCOPE")" != true ]]; then
   if [[ "$(jq -r .changes_review_tooling <<< "$SCOPE")" == true ]]; then
-    tooling_unreviewed "review tooling changed" "This PR changes the review workflow ($WORKFLOW_PATH)."
-    echo "::notice::Review tooling changed on PR: model skipped (check passes)."
-    skip
+    tooling_unreviewed "review tooling changed" "This PR changes the review workflow ($WORKFLOW_PATH)." "review workflow changed"
   fi
   step_summary "## Claude review: skipped (scope)"
   if [[ "$(jq -r .images_only_skip <<< "$SCOPE")" == true ]]; then
@@ -73,13 +81,10 @@ if [[ "$(jq -r .review <<< "$SCOPE")" != true ]]; then
   skip
 fi
 
-skip_workflow_validation=false
 if git cat-file -e "$BASE:$WORKFLOW_PATH" 2> /dev/null || git cat-file -e "HEAD:$WORKFLOW_PATH" 2> /dev/null; then
   if ! git cat-file -e "$BASE:$WORKFLOW_PATH" 2> /dev/null || ! git cat-file -e "HEAD:$WORKFLOW_PATH" 2> /dev/null ||
     ! git diff --quiet "$BASE:$WORKFLOW_PATH" "HEAD:$WORKFLOW_PATH" 2> /dev/null; then
-    tooling_unreviewed "workflow differs from default branch" "The review workflow ($WORKFLOW_PATH) on this PR differs from $PR_BASE."
-    skip_workflow_validation=true
-    echo "::notice::Review skipped: workflow differs from default branch"
+    tooling_unreviewed "workflow differs from default branch" "The review workflow ($WORKFLOW_PATH) on this PR differs from $PR_BASE." "workflow differs from default branch"
   fi
 fi
 
@@ -152,27 +157,34 @@ jq \
   --arg standards_sha256 "$STANDARDS_SHA" \
   --arg run_started "$RUN_STARTED" \
   --argjson job_started "$JOB_STARTED" \
-  --argjson skip_workflow_validation "$skip_workflow_validation" \
   '. + $ARGS.named' "$WORK/prior.json" > "$STATE"
 
 output review true
 output skip_model "$skip_model"
-output skip_workflow_validation "$skip_workflow_validation"
 output prior_comment_id "$(state prior_comment_id)"
 
 if [[ "$skip_model" == true ]]; then
   echo "::notice::Carry-forward review (no model run)."
-elif [[ "$skip_workflow_validation" == true ]]; then
-  :
 else
   # Claude may only load repo instructions and config from the base branch, never the PR head.
-  # That covers the root files and every nested CLAUDE.md, which Claude Code loads when it
-  # reads a file in that directory.
-  mapfile -t instruction_paths < <({
-    printf '%s\n' .claude CLAUDE.md CLAUDE.local.md
-    git ls-tree -r --name-only HEAD | grep -E '(^|/)CLAUDE(\.local)?\.md$' || true
-    git ls-tree -r --name-only "$BASE" | grep -E '(^|/)CLAUDE(\.local)?\.md$' || true
-  } | sort -u)
+  # That covers the root files, every nested CLAUDE.md, and nested .claude/ trees Claude Code loads.
+  claude_dir_paths() {
+    local ref="$1"
+    while IFS= read -r -d '' p; do
+      if [[ "$p" == .claude/* ]]; then
+        printf '%s\0' .claude
+      elif [[ "$p" == */.claude/* ]]; then
+        printf '%s\0' "${p%%/.claude/*}/.claude"
+      fi
+    done < <(git ls-tree -r -z --name-only "$ref" | grep -zE '(^|/)\.claude/' || true)
+  }
+  mapfile -d '' -t instruction_paths < <({
+    printf '%s\0' .claude CLAUDE.md CLAUDE.local.md
+    git ls-tree -r -z --name-only HEAD | grep -zE '(^|/)CLAUDE(\.local)?\.md$' || true
+    git ls-tree -r -z --name-only "$BASE" | grep -zE '(^|/)CLAUDE(\.local)?\.md$' || true
+    claude_dir_paths HEAD
+    claude_dir_paths "$BASE"
+  } | sort -zu)
   for path in "${instruction_paths[@]}"; do
     rm -rf "$path"
     if git cat-file -e "$BASE:$path" 2> /dev/null; then

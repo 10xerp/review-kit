@@ -34,10 +34,6 @@ export function parseResolvedIds(body) {
   return { fixed, dismissed };
 }
 
-export function parseFixedIds(body) {
-  return parseResolvedIds(body).fixed;
-}
-
 function sectionFor(line) {
   if (line.startsWith(ISSUES_HEADING)) return "must_fix";
   if (line.startsWith(SUGGESTIONS_HEADING)) return "should_fix";
@@ -78,10 +74,6 @@ export function maxFindingId(ids) {
   return max;
 }
 
-export function nextFindingId(existingIds) {
-  return `F${maxFindingId(existingIds) + 1}`;
-}
-
 function stampLine(f) {
   return `- [${f.id}] ${f.path}:${f.line} [${f.category}]: ${f.text}`;
 }
@@ -118,7 +110,7 @@ function insertCarried(lines, carriedLines) {
  * under Issues, so an unrelated push can never clear a Blocked verdict by itself. Suggestions
  * that are not re-listed are simply dropped, as the standards ask the model not to repeat them.
  */
-export function assignFindingIds(body, priorBody, { explicitFixedIds = [], maxId = 0 } = {}) {
+export function assignFindingIds(body, priorBody, { maxId = 0 } = {}) {
   const priorFindings = extractFindingsFromBody(priorBody);
   const priorById = new Map();
   const priorByKey = new Map();
@@ -129,7 +121,7 @@ export function assignFindingIds(body, priorBody, { explicitFixedIds = [], maxId
   }
 
   const resolved = parseResolvedIds(body);
-  const fixedSet = new Set([...explicitFixedIds, ...resolved.fixed]);
+  const fixedSet = new Set(resolved.fixed);
   const dismissedSet = new Set(resolved.dismissed);
   let highest = Math.max(maxId, maxFindingId(priorById.keys()));
   const lines = body.split("\n");
@@ -150,7 +142,9 @@ export function assignFindingIds(body, priorBody, { explicitFixedIds = [], maxId
     if (section && line.startsWith("- ")) {
       const parsed = parseFindingLine(line, section);
       if (parsed) {
-        let id = parsed.id && priorById.has(parsed.id) ? parsed.id : undefined;
+        const prior = parsed.id && priorById.get(parsed.id);
+        let id =
+          prior && prior.path === parsed.path && prior.severity === parsed.severity ? parsed.id : undefined;
         if (!id) id = priorByKey.get(findingMatchKey(parsed));
         if (!id || taken.has(id)) {
           highest += 1;

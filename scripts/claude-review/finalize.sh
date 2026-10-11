@@ -7,29 +7,10 @@ source "$(dirname "$0")/lib.sh"
 
 PR_NUMBER="$(state pr)"
 HEAD_SHA="$(state head_sha)"
-WORKFLOW_PATH="${GITHUB_WORKFLOW_REF:?}"
-WORKFLOW_PATH="${WORKFLOW_PATH%@*}"
-WORKFLOW_PATH="${WORKFLOW_PATH#"$GITHUB_REPOSITORY"/}"
-BASE="origin/$(state base_ref)"
 
-workflow_differs() {
-  if ! git cat-file -e "$BASE:$WORKFLOW_PATH" 2> /dev/null && ! git cat-file -e "HEAD:$WORKFLOW_PATH" 2> /dev/null; then
-    return 1
-  fi
-  if ! git cat-file -e "$BASE:$WORKFLOW_PATH" 2> /dev/null || ! git cat-file -e "HEAD:$WORKFLOW_PATH" 2> /dev/null; then
-    return 0
-  fi
-  ! git diff --quiet "$BASE:$WORKFLOW_PATH" "HEAD:$WORKFLOW_PATH" 2> /dev/null
-}
-
-if [[ "$(state skip_model)" != true && "$(state skip_workflow_validation)" != true ]]; then
+if [[ "$(state skip_model)" != true ]]; then
   phase model_done
-  if [[ -s "${EXECUTION_FILE:-}" ]]; then
-    :
-  elif [[ "${WORKFLOW_VALIDATION_SKIP:-}" == true ]] || workflow_differs; then
-    export WORKFLOW_VALIDATION_SKIP=true
-    echo "::notice::Review skipped: workflow differs from default branch"
-  else
+  if [[ ! -s "${EXECUTION_FILE:-}" ]]; then
     fail "No review verdict for this run. Re-run the workflow."
   fi
 fi
@@ -54,10 +35,6 @@ if [[ "$(jq -r .comment_length <<< "$result")" != 0 ]]; then
 fi
 
 [[ "$verdict" != blocked ]] || fail "Claude review: Blocked (must-fix Issues). See the PR comment."
-if [[ "$verdict" == skipped ]]; then
-  echo "Review skipped: workflow differs from default branch"
-  exit 0
-fi
 if [[ "$review_source" == carry_forward ]]; then
   echo "Review verdict (carry-forward): $summary"
 else

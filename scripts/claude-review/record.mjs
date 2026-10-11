@@ -88,7 +88,7 @@ export function buildReviewRecord(input) {
     return carriedSet.has(f.id) ? "carried" : "open";
   };
   return {
-    schema: 1,
+    schema: 2,
     repo: input.repo,
     pr: input.pr,
     base_ref: input.baseRef,
