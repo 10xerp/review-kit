@@ -9,6 +9,7 @@ import { reviewScope } from "./scope.mjs";
 import { parseVerdictLine, resolveReview, verdictSummary } from "./verdict.mjs";
 
 const env = process.env;
+const REVIEW_MODEL = "claude-opus-5-5";
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 const epoch = (iso) => Math.floor(Date.parse(iso) / 1000);
 
@@ -63,51 +64,43 @@ const commands = {
     });
   },
 
+  "tooling-record"(workDir, skipReason, pr, headSha, baseRef, baseSha, runStarted, jobStarted, standardsSha256, commentsPath) {
+    const comments = existsSync(commentsPath) ? readJson(commentsPath) : [];
+    const phasesPath = join(workDir, "phases.json");
+    const phases = existsSync(phasesPath) ? readJson(phasesPath) : { job_started: jobStarted };
+    const queueS = env.COMMIT_TIME ? Math.max(0, epoch(runStarted) - epoch(env.COMMIT_TIME)) : null;
+    const record = buildReviewRecord({
+      repo: env.GITHUB_REPOSITORY,
+      pr: Number(pr),
+      baseRef,
+      baseSha,
+      headSha,
+      lastSha: "",
+      mode: "skipped",
+      source: "tooling",
+      verdict: "skipped",
+      skipReason,
+      findings: [],
+      fixedIds: [],
+      replies: parseReplies(comments),
+      model: REVIEW_MODEL,
+      claudeCodeVersion: "",
+      actionSha: env.CLAUDE_CODE_ACTION_SHA ?? "",
+      standardsSha256: standardsSha256 ?? "",
+      runId: env.GITHUB_RUN_ID,
+      workflowRunUrl: `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`,
+      execution: {},
+      queueS: Number.isNaN(queueS) ? null : queueS,
+      wallS: Math.floor(Date.now() / 1000) - jobStarted,
+      phases: phaseDurations(phases),
+    });
+    writeFileSync(join(workDir, "review-record.json"), `${JSON.stringify(record, null, 2)}\n`);
+    return "{}";
+  },
+
   finalize(statePath, commentsPath, phasesPath, workDir) {
     const state = readJson(statePath);
     const comments = readJson(commentsPath);
-    const workflowSkip =
-      state.skip_workflow_validation === true ||
-      state.skip_workflow_validation === "true" ||
-      env.WORKFLOW_VALIDATION_SKIP === "true";
-    if (workflowSkip) {
-      const installMeta = join(workDir, "claude-code-bin", "install-meta.json");
-      const queueS = env.COMMIT_TIME ? Math.max(0, epoch(state.run_started) - epoch(env.COMMIT_TIME)) : null;
-      const record = buildReviewRecord({
-        repo: env.GITHUB_REPOSITORY,
-        pr: Number(state.pr),
-        baseRef: state.base_ref,
-        baseSha: state.base_sha,
-        headSha: state.head_sha,
-        lastSha: state.last_sha,
-        mode: "skipped",
-        source: "workflow_validation",
-        verdict: "skipped",
-        skipReason: "workflow differs from default branch",
-        findings: [],
-        fixedIds: [],
-        replies: parseReplies(comments),
-        model: env.REVIEW_MODEL,
-        claudeCodeVersion: existsSync(installMeta) ? readJson(installMeta).version : "",
-        actionSha: env.CLAUDE_CODE_ACTION_SHA,
-        standardsSha256: state.standards_sha256,
-        runId: env.GITHUB_RUN_ID,
-        workflowRunUrl: `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`,
-        execution: {},
-        queueS: Number.isNaN(queueS) ? null : queueS,
-        wallS: Math.floor(Date.now() / 1000) - state.job_started,
-        phases: phaseDurations(readJson(phasesPath)),
-      });
-      writeFileSync(join(workDir, "review-record.json"), `${JSON.stringify(record, null, 2)}\n`);
-      return JSON.stringify({
-        comment_id: "",
-        source: "workflow_validation",
-        verdict: "skipped",
-        summary: verdictSummary("skipped"),
-        comment_length: 0,
-        patch_comment: false,
-      });
-    }
     const source = state.skip_model ? "carry_forward" : "claude";
     const priorBody = readFileSync(state.prior_body_file, "utf8");
 
@@ -155,7 +148,7 @@ const commands = {
       dismissedIds: assigned.dismissedIds,
       carriedIds: assigned.carriedIds,
       replies: parseReplies(comments),
-      model: env.REVIEW_MODEL,
+      model: REVIEW_MODEL,
       claudeCodeVersion: existsSync(installMeta) ? readJson(installMeta).version : "",
       actionSha: env.CLAUDE_CODE_ACTION_SHA,
       standardsSha256: state.standards_sha256,

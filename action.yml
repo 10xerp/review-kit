@@ -14,22 +14,6 @@ inputs:
       PRs still skip. Default false keeps hub-style scope (skip docs and images).
     required: false
     default: "false"
-  tooling_change:
-    description: >-
-      What the check does when the model cannot run because the PR changes the workflow that runs
-      this review, or that workflow differs from the base branch (claude-code-action refuses both).
-      "fail" (default) fails the check so a person merges such a PR with an explicit, logged bypass;
-      "pass" passes it without a review, the pre-v2 behavior.
-    required: false
-    default: "fail"
-  model:
-    description: Claude model for the review.
-    required: false
-    default: claude-opus-5-5
-  max_turns:
-    description: Maximum agent turns for one review.
-    required: false
-    default: "22"
 
 outputs:
   verdict:
@@ -37,7 +21,7 @@ outputs:
     value: ${{ steps.finalize.outputs.verdict || steps.prep.outputs.verdict }}
   record_path:
     description: Path of review-record.json.
-    value: ${{ steps.finalize.outputs.record_path }}
+    value: ${{ steps.finalize.outputs.record_path || steps.prep.outputs.record_path }}
 
 runs:
   using: composite
@@ -47,18 +31,18 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         INPUT_REVIEW_DOCS: ${{ inputs.review_docs }}
-        INPUT_TOOLING_CHANGE: ${{ inputs.tooling_change }}
+        CLAUDE_CODE_ACTION_SHA: 1d6de8cb0c237e7c15e9e1bdf973826ebae490cc
       run: '"$GITHUB_ACTION_PATH/scripts/claude-review/prep.sh"'
 
     - id: install
-      if: steps.prep.outputs.review == 'true' && steps.prep.outputs.skip_model != 'true' && steps.prep.outputs.skip_workflow_validation != 'true'
+      if: steps.prep.outputs.review == 'true' && steps.prep.outputs.skip_model != 'true'
       shell: bash
       env:
         CLAUDE_CODE_ACTION_SHA: 1d6de8cb0c237e7c15e9e1bdf973826ebae490cc
       run: '"$GITHUB_ACTION_PATH/scripts/claude-review/install.sh"'
 
     - id: claude
-      if: steps.prep.outputs.review == 'true' && steps.prep.outputs.skip_model != 'true' && steps.prep.outputs.skip_workflow_validation != 'true'
+      if: steps.prep.outputs.review == 'true' && steps.prep.outputs.skip_model != 'true'
       uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1
       with:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
@@ -76,8 +60,7 @@ runs:
                 "Glob(.git/**)",
                 "Read(//proc/**)",
                 "Grep(//proc/**)",
-                "Glob(//proc/**)",
-                "Bash(git diff --no-index:*)"
+                "Glob(//proc/**)"
               ]
             }
           }
@@ -90,9 +73,9 @@ runs:
           --strict-mcp-config
           --restricted
           --tools "Bash,Glob,Grep,Read"
-          --disallowedTools "Bash(git add:*),Bash(git commit:*),Bash(git rm:*),Bash(git diff --no-index:*)"
-          --model ${{ inputs.model }}
-          --max-turns ${{ inputs.max_turns }}
+          --disallowedTools "Bash(git add:*),Bash(git commit:*),Bash(git rm:*)"
+          --model claude-opus-5-5
+          --max-turns 22
           --allowedTools "Glob,Grep,LS,Read,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*)"
         prompt: ${{ steps.prep.outputs.prompt }}
 
@@ -102,16 +85,14 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
-        WORKFLOW_VALIDATION_SKIP: ${{ steps.prep.outputs.skip_workflow_validation }}
         CLAUDE_CODE_ACTION_SHA: 1d6de8cb0c237e7c15e9e1bdf973826ebae490cc
-        REVIEW_MODEL: ${{ inputs.model }}
       run: '"$GITHUB_ACTION_PATH/scripts/claude-review/finalize.sh"'
 
-    - if: always() && steps.finalize.outputs.record_path != ''
+    - if: always() && (steps.finalize.outputs.record_path != '' || steps.prep.outputs.record_path != '')
       uses: actions/upload-artifact@v4
       with:
         name: claude-review-record-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
-        path: ${{ steps.finalize.outputs.record_path }}
+        path: ${{ steps.finalize.outputs.record_path || steps.prep.outputs.record_path }}
         retention-days: 90
 
     - if: cancelled() && steps.prep.outputs.prior_comment_id != ''

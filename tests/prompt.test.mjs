@@ -39,6 +39,25 @@ Block test.
     );
   });
 
+  it("includes prior open findings in full review mode without the incremental sentence", () => {
+    const prompt = buildPrompt({
+      ...base,
+      mode: "full",
+      diffInstruction: "git diff origin/main...HEAD",
+      lastSha: "oldsha",
+      openFindings: "- [F1] src/a.ts:1 [security]: leak",
+    });
+    assert.doesNotMatch(prompt, /incremental re-review since/);
+    assert.ok(
+      prompt.includes(
+        "Every prior open Must Fix below stays open, and keeps the PR Blocked, until you close it: " +
+          "write `Fixed: F#` after checking the fix landed, or `Dismissed: F#` when a /fp or /wontfix reply convinces you. " +
+          "Re-list a still-open one under Issues only to update its wording; leaving it out does not close it. " +
+          "Do not repeat Suggestions from the prior review. Prior open findings:\n- [F1] src/a.ts:1 [security]: leak\n",
+      ),
+    );
+  });
+
   it("adds hub's incremental block with the prior open findings", () => {
     const prompt = buildPrompt({
       ...base,

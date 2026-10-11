@@ -5,7 +5,6 @@ import {
   extractFindingsFromBody,
   extractOpenFindingsForPrompt,
   parseFindingLine,
-  parseFixedIds,
   parseResolvedIds,
 } from "../scripts/claude-review/findings.mjs";
 
@@ -78,13 +77,20 @@ Fixed: F1
     assert.equal(maxId, 7);
   });
 
-  it("keeps an id the model wrote when it matches a prior finding, even at a new line", () => {
+  it("keeps an id the model wrote when path and severity still match the prior finding", () => {
     const prior = "## Issues (Must Fix)\n- [F2] a.ts:1 [security]: x\n";
-    const body = "## Issues (Must Fix)\n- [F2] a.ts:9 [security]: x moved\n- [F8] b.ts:1 [security]: unknown id\n";
-    assert.deepEqual(
-      assignFindingIds(body, prior).findings.map((f) => f.id),
-      ["F2", "F3"],
-    );
+    const body = "## Issues (Must Fix)\n- [F2] a.ts:9 [security]: x moved\n";
+    assert.deepEqual(assignFindingIds(body, prior).findings.map((f) => f.id), ["F2"]);
+  });
+
+  it("does not let the model reuse an id on another path or severity section", () => {
+    const prior = "## Issues (Must Fix)\n- [F2] a.ts:1 [security]: x\n";
+    const body =
+      "# Review: Blocked\n\n## Issues (Must Fix)\n- [F2] b.ts:1 [security]: unrelated\n\n## Suggestions (Should Fix)\n- [F2] a.ts:1 [convention]: different category in suggestions\n";
+    const r = assignFindingIds(body, prior);
+    const newIds = r.findings.filter((f) => !r.carriedIds.includes(f.id)).map((f) => f.id);
+    assert.deepEqual(newIds, ["F3", "F4"]);
+    assert.deepEqual(r.carriedIds, ["F2"]);
   });
 
   it("carries an unclosed Must Fix forward under Issues and leaves Suggestions behind", () => {
@@ -136,11 +142,7 @@ Fixed: F1
   });
 });
 
-describe("parseFixedIds", () => {
-  it("reads Fixed lines", () => {
-    assert.deepEqual(parseFixedIds("Fixed: F2\nFixed: F3"), ["F2", "F3"]);
-  });
-
+describe("parseResolvedIds", () => {
   it("separates Fixed from Dismissed", () => {
     assert.deepEqual(parseResolvedIds("Fixed: F2\nDismissed: F3 (fp)\nFixed: F4"), { fixed: ["F2", "F4"], dismissed: ["F3"] });
   });

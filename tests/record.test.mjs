@@ -46,7 +46,7 @@ describe("parseExecutionFile", () => {
 });
 
 describe("buildReviewRecord", () => {
-  it("builds a schema-1 record with findings and replies", () => {
+  it("builds a schema-2 record with findings and replies", () => {
     const reply = { finding_id: "F1", reply: "fp", reason: "guarded upstream", author: "alice", comment_id: 5, created_at: "" };
     const record = buildReviewRecord({
       repo: "10xerp/hub",
@@ -75,7 +75,7 @@ describe("buildReviewRecord", () => {
       wallS: 54,
       phases: { install_s: 3 },
     });
-    assert.equal(record.schema, 1);
+    assert.equal(record.schema, 2);
     assert.deepEqual(record.findings.map((f) => f.status), ["open", "fixed"]);
     assert.equal(record.metrics.duration_ms, 8000);
     assert.equal(record.metrics.queue_s, 2);
