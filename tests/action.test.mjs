@@ -13,14 +13,14 @@ describe("action.yml", () => {
     for (const sha of pinned) assert.equal(sha, uses);
   });
 
-  it("uses hub v14's fixed model and turn limit", () => {
+  it("uses a fixed model and turn limit", () => {
     assert.deepEqual(claudeArgs, [
       "--strict-mcp-config",
       "--restricted",
       '--tools "Bash,Glob,Grep,Read"',
       '--disallowedTools "Bash(git add:*),Bash(git commit:*),Bash(git rm:*)"',
       "--model claude-opus-5-5",
-      "--max-turns 22",
+      "--max-turns 60",
       '--allowedTools "Glob,Grep,LS,Read,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*)"',
     ]);
     assert.match(claudeArgs.join(" "), /Bash\(git diff:\*\)/);

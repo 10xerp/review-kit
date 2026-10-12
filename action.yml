@@ -14,13 +14,6 @@ inputs:
       PRs still skip. Default false keeps hub-style scope (skip docs and images).
     required: false
     default: "false"
-  max_turns:
-    description: >-
-      The most turns the review may take. Typical reviews take 4 to 12, and a large PR reading 60
-      or more files needs more. The cap guards against a runaway review, so raise it rather than
-      remove it.
-    required: false
-    default: "60"
 
 outputs:
   verdict:
@@ -82,7 +75,7 @@ runs:
           --tools "Bash,Glob,Grep,Read"
           --disallowedTools "Bash(git add:*),Bash(git commit:*),Bash(git rm:*)"
           --model claude-opus-5-5
-          --max-turns ${{ inputs.max_turns }}
+          --max-turns 60
           --allowedTools "Glob,Grep,LS,Read,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*)"
         prompt: ${{ steps.prep.outputs.prompt }}
 

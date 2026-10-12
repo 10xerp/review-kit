@@ -53,7 +53,6 @@ To require the review before merging, make the `claude-review` job a required st
 | --- | --- | --- |
 | `claude_code_oauth_token` | required | Claude Code OAuth token. |
 | `review_docs` | `false` | When `true`, review PRs that only change Markdown or files under `docs/` (for example PII checks in a docs repo, or a repo whose review standards and agent skills live in Markdown). Image-only PRs still skip. Default `false` skips docs and images. |
-| `max_turns` | `60` | The most turns the review may take. Typical reviews take 4 to 12, and a PR touching 60 or more files needs more. The cap guards against a runaway review, so raise it rather than remove it. |
 
 **Outputs:** `verdict` (`approved`, `approve_with_notes`, `blocked` or `skipped`) and `record_path`.
 
@@ -107,7 +106,7 @@ These PRs are not reviewed either, because claude-code-action refuses to start, 
 
 **Record.** Each run uploads a `claude-review-record-<pr>-<run id>-<attempt>` artifact when a record is written, kept for 90 days (including tooling-blocked runs). It is `review-record.json` (schema 2) and contains the verdict, mode, findings with IDs and status (`open`, `carried`, `fixed` or `dismissed`), fixed, dismissed and carried IDs, replies, model, Claude Code version, action and standards SHAs, skip reason when the model did not run, and metrics. The metrics are model time (`duration_ms`), turns, cost, queue time, wall time, and phase timestamps and durations (`prep_s`, `install_s`, `model_s`, `finalize_s`, `direct_install_s`).
 
-**Claude Code.** The review runs [claude-code-action](https://github.com/anthropics/claude-code-action) at a pinned commit, with model `claude-opus-5-5` and at most 60 turns by default (the `max_turns` input). Typical reviews take 4 to 12. The old cap of 22 stopped reviews of 60-file PRs before they posted a verdict. The kit downloads the Claude Code release that this commit pins and checks it against the release manifest's sha256. If the download fails, the action installs Claude Code itself.
+**Claude Code.** The review runs [claude-code-action](https://github.com/anthropics/claude-code-action) at a pinned commit, with model `claude-opus-5-5` and at most 60 turns. Typical reviews take 4 to 12. The cap only stops a runaway review, and 22 was low enough to stop reviews of 60-file PRs before they posted a verdict. It is fixed in the kit rather than an input, so a PR cannot lower it. The kit downloads the Claude Code release that this commit pins and checks it against the release manifest's sha256. If the download fails, the action installs Claude Code itself.
 
 **Security.** The kit is built for same-repository PRs from people and bots you already trust with the repo. Its job is to stop the PR from steering its own review, not to contain a hostile author: anyone who can open a PR in the repo can already read its secrets by editing a workflow.
 - The review standards come from the PR's base branch. `.claude/`, `CLAUDE.md`, `CLAUDE.local.md`, every nested `CLAUDE.md`, and nested `.claude/` directories are replaced by their base-branch versions (or removed) before Claude starts, so a PR cannot add instructions Claude would load.
