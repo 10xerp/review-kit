@@ -22,6 +22,12 @@ export function buildPrompt({ repo, pr, headSha, baseRef, mode, diffInstruction,
   const priorFindingsBlock = open
     ? `${mode === "incremental" ? `This is an incremental re-review since ${lastSha}. ` : ""}${carryRules} Prior open findings:\n${open}`
     : "";
+  // Each review round costs a push, CI and another review, so the full pass reports everything and
+  // later passes judge only what the new commits changed.
+  const scopeRule =
+    mode === "incremental"
+      ? `Judge only what changed since ${lastSha}. Raise an Issue or Suggestion only for a defect these commits introduced, including a fix that is wrong or incomplete. Code that was already in the PR at ${lastSha} had its full review: do not raise new findings on it. Changes that arrived by merging the PR base are not this PR's; skip them. Suggestions in this mode are only \`[security]\`, \`[correctness]\` or \`[data-loss]\`: skip convention, maintainability, wording and comment notes, and anything no current caller can reach.`
+      : "This is the one full pass on this PR. Report every Must Fix and Suggestion you find now: later pushes get only an incremental review of what changed, and a finding held back costs the author another round.";
   return [
     `REPO: ${repo}`,
     `PR NUMBER: ${pr}`,
@@ -32,6 +38,8 @@ export function buildPrompt({ repo, pr, headSha, baseRef, mode, diffInstruction,
     "Skip the self-review loop. Do not run pnpm, npm, vitest, installs, builds, or CI commands; CI already does that.",
     "",
     `Start from \`${diffInstruction}\` (PR base \`${baseRef}\`). Read every file touched in that diff in full (not only hunks). Use Grep for callers of changed public APIs.`,
+    "",
+    scopeRule,
     "",
     priorFindingsBlock,
     "",

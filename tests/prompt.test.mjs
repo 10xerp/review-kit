@@ -25,6 +25,8 @@ Skip the self-review loop. Do not run pnpm, npm, vitest, installs, builds, or CI
 
 Start from \`git diff origin/main...HEAD\` (PR base \`main\`). Read every file touched in that diff in full (not only hunks). Use Grep for callers of changed public APIs.
 
+This is the one full pass on this PR. Report every Must Fix and Suggestion you find now: later pushes get only an incremental review of what changed, and a finding held back costs the author another round.
+
 
 
 Post the review as the sticky PR comment (update in place). First line must be exactly one of:
@@ -75,6 +77,9 @@ Block test.
       ),
     );
     assert.ok(prompt.includes("Start from `git diff last..HEAD -- src/a.ts` (PR base `main`)."));
+    assert.ok(prompt.includes("Judge only what changed since lastsha."));
+    assert.ok(prompt.includes("Suggestions in this mode are only `[security]`, `[correctness]` or `[data-loss]`"));
+    assert.doesNotMatch(prompt, /one full pass/);
   });
 });
 
