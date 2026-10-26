@@ -14,6 +14,13 @@ inputs:
       PRs still skip. Default false keeps hub-style scope (skip docs and images).
     required: false
     default: "false"
+  sticky_comment:
+    description: >-
+      When false (the default), each run posts a new comment, so the PR keeps every review in order
+      and the latest one is the verdict. When true, each run rewrites the PR's one review comment in
+      place. Open Must Fix findings carry forward from the latest review either way.
+    required: false
+    default: "false"
 
 outputs:
   verdict:
@@ -48,7 +55,7 @@ runs:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         allowed_bots: claude, cursor
         track_progress: true
-        use_sticky_comment: true
+        use_sticky_comment: ${{ inputs.sticky_comment }}
         path_to_claude_code_executable: ${{ steps.install.outputs.claude_code_path }}
         settings: |
           {
@@ -95,8 +102,9 @@ runs:
         path: ${{ steps.finalize.outputs.record_path || steps.prep.outputs.record_path }}
         retention-days: 90
 
-    - if: cancelled() && steps.prep.outputs.prior_comment_id != ''
+    - if: cancelled() && (steps.prep.outputs.prior_comment_id != '' || inputs.sticky_comment != 'true')
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
+        INPUT_STICKY_COMMENT: ${{ inputs.sticky_comment }}
       run: '"$GITHUB_ACTION_PATH/scripts/claude-review/cancel-cleanup.sh"'

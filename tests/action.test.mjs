@@ -52,4 +52,10 @@ describe("action.yml", () => {
     assert.match(action, /default: "false"/);
     assert.match(action, /INPUT_REVIEW_DOCS: \$\{\{ inputs\.review_docs \}\}/);
   });
+
+  it("posts a comment per run by default and lets a repo keep one sticky comment", () => {
+    assert.match(action, /^\s+sticky_comment:\n(?:.*\n)*?\s+default: "false"/m);
+    assert.match(action, /use_sticky_comment: \$\{\{ inputs\.sticky_comment \}\}/);
+    assert.match(action, /INPUT_STICKY_COMMENT: \$\{\{ inputs\.sticky_comment \}\}/);
+  });
 });
