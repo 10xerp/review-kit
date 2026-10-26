@@ -1,0 +1,73 @@
+name: Bump review-kit consumers
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to bump consumers to (e.g. v4)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Resolve release tag and commit
+        id: release
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          SHA="$(git rev-parse "${TAG}^{commit}")"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "Resolved ${TAG} -> ${SHA}"
+
+      - name: Create GitHub App token (10xerp)
+        id: app-token-10xerp
+        continue-on-error: true
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.REVIEW_KIT_BUMP_GITHUB_APP_ID }}
+          private-key: ${{ secrets.REVIEW_KIT_BUMP_GITHUB_APP_PRIVATE_KEY }}
+          owner: 10xerp
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Create GitHub App token (bd28)
+        id: app-token-bd28
+        continue-on-error: true
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.REVIEW_KIT_BUMP_GITHUB_APP_ID }}
+          private-key: ${{ secrets.REVIEW_KIT_BUMP_GITHUB_APP_PRIVATE_KEY }}
+          owner: bd28
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Open or update consumer bump PRs
+        env:
+          REVIEW_KIT_TAG: ${{ steps.release.outputs.tag }}
+          REVIEW_KIT_SHA: ${{ steps.release.outputs.sha }}
+          REVIEW_KIT_BUMP_TOKEN_10XERP: ${{ steps.app-token-10xerp.outputs.token }}
+          REVIEW_KIT_BUMP_TOKEN_BD28: ${{ steps.app-token-bd28.outputs.token }}
+        run: node scripts/release/bump-consumers.mjs

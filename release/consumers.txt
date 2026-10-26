@@ -1,0 +1,11 @@
+# Consumer repositories that pin 10xerp/review-kit in .github/workflows.
+# One owner/repo per line. Lines starting with # are ignored.
+10xerp/hub
+10xerp/billing
+bd28/10x-biz
+10xerp/phone
+10xerp/insights
+10xerp/atlas
+10xerp/10xerp.com
+10xerp/pulse
+bd28/legacy

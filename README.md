@@ -120,6 +120,27 @@ These PRs are not reviewed either, because claude-code-action refuses to start, 
 
 **Cancellation.** If a run is cancelled (for example by a newer push) while the comment still shows Claude's progress placeholder, the previous review is restored.
 
+## Release bumps
+
+Tag a release with an annotated tag (`v1`, `v2`, …). Pushing a tag matching `v*` runs the **Bump review-kit consumers** workflow, which opens (or updates) a pull request in each repo listed in [`release/consumers.txt`](release/consumers.txt). Consumers must keep pinning this action by full 40-character commit SHA with a `# vN` comment, never a branch or tag ref. The workflow never merges; a human merges each bump PR.
+
+Bump PRs change `.github/workflows`, so the `claude-review` check fails by design. Merge them with a repository admin bypass (same as any PR that updates the review workflow).
+
+Re-run a bump manually with **Actions → Bump review-kit consumers → Run workflow** and the tag name (for example `v4`).
+
+### One-time setup (Brian)
+
+The default `GITHUB_TOKEN` in this repository cannot write to other repos, and one fine-grained PAT cannot cover both the **10xerp** organization and the **bd28** personal account. Use one **GitHub App** and mint an installation token per owner with `actions/create-github-app-token`:
+
+1. Create a GitHub App (for example under **10xerp**).
+2. **Permissions** (repository): **Contents** read & write, **Pull requests** read & write, **Workflows** read & write (workflow files live under `.github/workflows`).
+3. Install the app on **all** consumer repositories under **10xerp** and **bd28** (see `release/consumers.txt`). Both installations use the same App ID and private key.
+4. Add these **repository secrets** on **10xerp/review-kit**:
+   - `REVIEW_KIT_BUMP_GITHUB_APP_ID` — the app’s numeric ID
+   - `REVIEW_KIT_BUMP_GITHUB_APP_PRIVATE_KEY` — the app’s PEM private key (`-----BEGIN RSA PRIVATE KEY-----` …)
+
+If the secrets are missing or an owner has no installation, repos under that owner are reported as failed in the workflow summary with a clear message; other repos still run.
+
 ## Development
 
 ```bash
