@@ -1,6 +1,6 @@
 # review-kit
 
-A composite GitHub Action that runs the 10X Claude pull request review. Claude posts one sticky review comment on the PR, and the check fails when the review is **Blocked** or when the review could not run on a PR that changes the review tooling.
+A composite GitHub Action that runs the 10X Claude pull request review. Claude posts one sticky review comment on the PR (or a new comment per run with `sticky_comment: false`), and the check fails when the review is **Blocked** or when the review could not run on a PR that changes the review tooling.
 
 ## Setup
 
@@ -41,6 +41,8 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Docs-heavy repos (e.g. 10x-biz): review Markdown and docs/ changes.
           # review_docs: true
+          # Keep every review on the PR instead of rewriting one comment.
+          # sticky_comment: false
 ```
 
 Keep the checkout's default credentials: claude-code-action fetches the PR branch with them before it switches to its own token.
@@ -53,6 +55,7 @@ To require the review before merging, make the `claude-review` job a required st
 | --- | --- | --- |
 | `claude_code_oauth_token` | required | Claude Code OAuth token. |
 | `review_docs` | `false` | When `true`, review PRs that only change Markdown or files under `docs/` (for example PII checks in a docs repo, or a repo whose review standards and agent skills live in Markdown). Image-only PRs still skip. Default `false` skips docs and images. |
+| `sticky_comment` | `true` | When `true`, each run rewrites the PR's one review comment, so the PR shows only the latest verdict and earlier ones live in the comment's edit history. When `false`, each run posts a new comment, so the PR shows every review in order; the newest is the verdict, and open Must Fix findings carry forward from it the same way. A cancelled run deletes its own placeholder. |
 
 **Outputs:** `verdict` (`approved`, `approve_with_notes`, `blocked` or `skipped`) and `record_path`.
 
@@ -129,5 +132,5 @@ The review job uses only bash, `jq`, `curl` and plain Node.js ESM, with no packa
 - `prep.sh` decides scope and mode, then writes the prompt.
 - `install.sh` downloads Claude Code.
 - `finalize.sh` stamps the comment, writes the record and applies the gate.
-- `cancel-cleanup.sh` restores the previous comment after a cancellation.
+- `cancel-cleanup.sh` restores the previous comment after a cancellation, or with `sticky_comment: false` deletes the run's placeholder.
 - `cli.mjs` connects the scripts to the Node modules.

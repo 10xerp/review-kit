@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stamps finding IDs and review metadata on the sticky comment, writes the review record and fails
+# Stamps finding IDs and review metadata on this run's review comment, writes the review record and fails
 # the check when the review is Blocked.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh

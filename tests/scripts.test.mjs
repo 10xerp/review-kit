@@ -130,9 +130,9 @@ function step(t, script, env = {}) {
 
 /**
  * Runs the action's steps: prep, then (when the model runs) a simulated Claude that writes
- * `claudeBody` into the sticky comment, then finalize.
+ * `claudeBody` into the sticky comment (or a new one with `newComment`), then finalize.
  */
-function review(t, { action = "synchronize", draft = false, comments = [], claudeBody, execution = true, prepEnv = {} }) {
+function review(t, { action = "synchronize", draft = false, comments = [], claudeBody, execution = true, prepEnv = {}, newComment = false }) {
   writeFileSync(
     join(t.root, "event.json"),
     JSON.stringify({ action, pull_request: { number: 7, draft, head: { sha: t.headSha }, base: { ref: "main" } } }),
@@ -151,7 +151,8 @@ function review(t, { action = "synchronize", draft = false, comments = [], claud
     CLAUDE_CODE_ACTION_SHA: "1d6de8cb0c237e7c15e9e1bdf973826ebae490cc",
   };
   if (prep.outputs.skip_model !== "true") {
-    const sticky = comments.find((c) => c.id === Number(prep.outputs.prior_comment_id));
+    // With per-run comments Claude posts a new comment and leaves the prior review as it was.
+    const sticky = newComment ? undefined : comments.find((c) => c.id === Number(prep.outputs.prior_comment_id));
     const others = comments.filter((c) => c !== sticky);
     const written = { id: sticky?.id ?? 900, user: bot, body: claudeBody, updated_at: "2999-01-01T00:00:00Z" };
     writeFileSync(join(t.stubs, "comments.json"), JSON.stringify(claudeBody ? [...others, written] : comments));
@@ -538,6 +539,21 @@ describe("re-reviews", () => {
   });
 });
 
+describe("per-run comments", () => {
+  it("stamps the new comment and closes the prior review's Must Fix from it", () => {
+    const t = setup([{ "src/app.js": "export const a = 2;\n" }, { "src/app.js": "export const a = 3;\n" }]);
+    const prior = priorComment(t, {
+      verdict: "blocked",
+      lastSha: t.shas[0],
+      body: "# Review: Blocked\n\n## Issues (Must Fix)\n- [F1] src/app.js:1 [security]: tenant filter missing",
+    });
+    const run = review(t, { comments: [prior], claudeBody: "# Review: Approved\n\nFixed: F1\n", newComment: true });
+    assertGate(run, "approved");
+    assert.equal(run.patchedId, "900");
+    assert.deepEqual(run.record.fixed_ids, ["F1"]);
+  });
+});
+
 describe("cancel cleanup", () => {
   function cancelled(t, currentBody) {
     const prior = priorComment(t, { verdict: "blocked", lastSha: t.shas[0], body: "# Review: Blocked\n\n## Issues (Must Fix)\n- [F1] a.js:1 [security]: x" });
@@ -556,6 +572,21 @@ describe("cancel cleanup", () => {
     assert.equal(run.status, 0, run.stderr);
     assert.equal(restored, prior.body);
     assert.equal(readMeta(restored).verdict, "blocked");
+  });
+
+  it("deletes this run's placeholder and leaves the prior review alone with per-run comments", () => {
+    const t = setup();
+    const prior = priorComment(t, { verdict: "approved", lastSha: t.shas[0], body: "# Review: Approved" });
+    writeFileSync(join(t.root, "event.json"), JSON.stringify({ action: "opened", pull_request: { number: 7, head: { sha: t.headSha }, base: { ref: "main" } } }));
+    writeFileSync(join(t.stubs, "comments.json"), JSON.stringify([prior]));
+    assert.equal(step(t, "prep.sh").status, 0);
+    const placeholder = { id: 901, user: bot, body: "Claude Code is working…", created_at: "2999-01-01T00:00:00Z" };
+    writeFileSync(join(t.stubs, "comments.json"), JSON.stringify([prior, placeholder]));
+    const run = step(t, "cancel-cleanup.sh", { INPUT_STICKY_COMMENT: "false" });
+    assert.equal(run.status, 0, run.stderr);
+    const log = readFileSync(join(t.stubs, "gh.log"), "utf8");
+    assert.match(log, /--method DELETE repos\/10xerp\/example\/issues\/comments\/901/);
+    assert.doesNotMatch(log, /--method (PATCH|DELETE) \S+\/comments\/50\b/);
   });
 
   it("leaves a finished review alone", () => {

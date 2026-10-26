@@ -29,7 +29,7 @@ This is the one full pass on this PR. Report every Must Fix and Suggestion you f
 
 
 
-Post the review as the sticky PR comment (update in place). First line must be exactly one of:
+Post the review in your PR comment, updating it in place. First line must be exactly one of:
 \`# Review: Approved\`, \`# Review: Approve with notes\`, or \`# Review: Blocked\`.
 
 <review_standards>
