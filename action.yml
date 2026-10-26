@@ -16,11 +16,11 @@ inputs:
     default: "false"
   sticky_comment:
     description: >-
-      When true (the default), each run rewrites the PR's one review comment in place. When false,
-      each run posts a new comment, so the PR keeps every review in order and the latest one is the
-      verdict. Open Must Fix findings carry forward from the latest review either way.
+      When false (the default), each run posts a new comment, so the PR keeps every review in order
+      and the latest one is the verdict. When true, each run rewrites the PR's one review comment in
+      place. Open Must Fix findings carry forward from the latest review either way.
     required: false
-    default: "true"
+    default: "false"
 
 outputs:
   verdict:
@@ -102,7 +102,7 @@ runs:
         path: ${{ steps.finalize.outputs.record_path || steps.prep.outputs.record_path }}
         retention-days: 90
 
-    - if: cancelled() && (steps.prep.outputs.prior_comment_id != '' || inputs.sticky_comment == 'false')
+    - if: cancelled() && (steps.prep.outputs.prior_comment_id != '' || inputs.sticky_comment != 'true')
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}

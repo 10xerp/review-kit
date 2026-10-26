@@ -561,7 +561,7 @@ describe("cancel cleanup", () => {
     writeFileSync(join(t.stubs, "comments.json"), JSON.stringify([prior]));
     assert.equal(step(t, "prep.sh").status, 0);
     writeFileSync(join(t.stubs, "current-body.txt"), currentBody);
-    const run = step(t, "cancel-cleanup.sh");
+    const run = step(t, "cancel-cleanup.sh", { INPUT_STICKY_COMMENT: "true" });
     const patch = join(t.stubs, "PATCH.json");
     return { run, prior, restored: existsSync(patch) ? JSON.parse(readFileSync(patch, "utf8")).body : null };
   }
@@ -574,7 +574,7 @@ describe("cancel cleanup", () => {
     assert.equal(readMeta(restored).verdict, "blocked");
   });
 
-  it("deletes this run's placeholder and leaves the prior review alone with per-run comments", () => {
+  it("deletes this run's placeholder and leaves the prior review alone by default", () => {
     const t = setup();
     const prior = priorComment(t, { verdict: "approved", lastSha: t.shas[0], body: "# Review: Approved" });
     writeFileSync(join(t.root, "event.json"), JSON.stringify({ action: "opened", pull_request: { number: 7, head: { sha: t.headSha }, base: { ref: "main" } } }));
@@ -582,7 +582,7 @@ describe("cancel cleanup", () => {
     assert.equal(step(t, "prep.sh").status, 0);
     const placeholder = { id: 901, user: bot, body: "Claude Code is working…", created_at: "2999-01-01T00:00:00Z" };
     writeFileSync(join(t.stubs, "comments.json"), JSON.stringify([prior, placeholder]));
-    const run = step(t, "cancel-cleanup.sh", { INPUT_STICKY_COMMENT: "false" });
+    const run = step(t, "cancel-cleanup.sh");
     assert.equal(run.status, 0, run.stderr);
     const log = readFileSync(join(t.stubs, "gh.log"), "utf8");
     assert.match(log, /--method DELETE repos\/10xerp\/example\/issues\/comments\/901/);
